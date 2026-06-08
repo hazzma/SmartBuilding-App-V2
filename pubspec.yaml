@@ -1,0 +1,29 @@
+# EDIT_TARGET: pubspec.yaml
+# EDIT_PURPOSE: Configuration file for Flutter dependencies and metadata
+# EDIT_REASON: Specified packages are required for Phase 1 scaffolding
+name: smart_building_app
+description: "A new Flutter project."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.2
+  fl_chart: ^0.68.0
+  shared_preferences: ^2.2.2
+  uuid: ^4.3.3
+  firebase_core: ^2.27.0
+  firebase_auth: ^4.17.8
+  calendar_date_picker2: ^3.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true

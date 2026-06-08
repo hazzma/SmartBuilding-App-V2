@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "582814466885",
+    "project_id": "smart-building-c39f7",
+    "storage_bucket": "smart-building-c39f7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:582814466885:android:303d24dbb6ba49a3b2b42c",
+        "android_client_info": {
+          "package_name": "com.example.smart_building_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCpRnGXIGztNOcJIMaNI3IuNmJQRTnliPU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
