@@ -90,7 +90,7 @@ class _AppShell extends StatefulWidget {
 
 class _AppShellState extends State<_AppShell> {
   int _currentIndex = 0;
-  final InfluxDbService _influxDbService = InfluxDbService();
+  InfluxDbService _influxDbService = InfluxDbService();
   int _homeRefreshSignal = 0;
   int _scheduleRefreshSignal = 0;
   int _classesRefreshSignal = 0;
@@ -187,6 +187,9 @@ class _AppShellState extends State<_AppShell> {
           ),
           SettingsScreen(
             onSignOut: widget.authService.signOut,
+            // NEW UPDATE: INPUT SERVER - Sends active InfluxDB config to Settings.
+            influxDbService: _influxDbService,
+            onInfluxDbChanged: _updateInfluxDb,
           ),
         ],
       ),
@@ -200,7 +203,7 @@ class _AppShellState extends State<_AppShell> {
             label: 'Schedule',
           ),
           NavigationDestination(
-            icon: Icon(Icons.meeting_room), label: 'Classes'),
+              icon: Icon(Icons.meeting_room), label: 'Classes'),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
@@ -233,5 +236,16 @@ class _AppShellState extends State<_AppShell> {
         _classesRefreshSignal++;
       }
     });
+  }
+
+  // NEW UPDATE: INPUT SERVER - Applies Settings values to all InfluxDB screens.
+  void _updateInfluxDb(InfluxDbService service) {
+    setState(() {
+      _influxDbService = service;
+      _homeRefreshSignal++;
+      _scheduleRefreshSignal++;
+      _classesRefreshSignal++;
+    });
+    _loadClassrooms();
   }
 }

@@ -11,7 +11,7 @@ import '../models/influx_room_data.dart';
 
 class InfluxDbService {
   InfluxDbService({
-    this.url = 'http://localhost:8086',
+    this.url = 'http://10.194.151.250:8086',
     this.token =
         'T60ZU0IiObzr_2miqrya32DaAdl7Rer1MQv1pF_Xg0fRE32K8zPGn8LI7JsdblJ_-s13qi80vux87cswsAdxzw==',
     this.bucket = 'SmartClass',

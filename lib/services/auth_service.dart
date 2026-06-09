@@ -49,7 +49,13 @@ class AuthService extends ChangeNotifier {
         email: email.trim(),
         password: password,
       );
-      _applyFirebaseUser(credential.user);
+      final user = _auth!.currentUser ?? credential.user;
+      if (user == null) {
+        _lastError = 'Firebase login completed without a user session.';
+        return false;
+      }
+      _applyFirebaseUser(user);
+      debugPrint('AuthService: Sign in completed for ${user.email}.');
       notifyListeners();
       return true;
     } on FirebaseAuthException catch (e) {
@@ -128,7 +134,13 @@ class AuthService extends ChangeNotifier {
 
     _isListeningToAuthChanges = true;
     _auth!.authStateChanges().listen((User? user) {
-      _applyFirebaseUser(user);
+      // Ignore a delayed initial null event when Firebase already has a user.
+      final currentUser = _auth?.currentUser ?? user;
+      _applyFirebaseUser(currentUser);
+      debugPrint(
+        'AuthService: Auth state changed to '
+        '${currentUser?.email ?? 'signed out'}.',
+      );
       notifyListeners();
     });
   }
