@@ -62,7 +62,11 @@ lib/
   app.dart
   theme/
   models/
+    class_room_config.dart
+    influx_room_data.dart
   services/
+    auth_service.dart
+    influxdb_service.dart
   screens/
     auth_screen.dart
     home_screen.dart
@@ -70,11 +74,9 @@ lib/
     devices_screen.dart (Classes Screen)
     settings_screen.dart
   widgets/
+    app_badge.dart
     app_button.dart
-    power_button.dart
-    step_button.dart
     app_card.dart
-    sensor_graph.dart
 ```
 
 If a feature can be implemented in one readable widget file, do not split it into five files. If local state is enough, do not create complex global state. If an abstraction makes deadline debugging harder, do not add it.
@@ -130,10 +132,8 @@ Each classroom config minimally contains:
 - `id`
 - `className`
 - `displayName`
+- `buildingName`
 - `floorName`
-- `showInHome`
-- `detectedSensors`
-- `enabledControls`
 
 Classroom config items can be:
 

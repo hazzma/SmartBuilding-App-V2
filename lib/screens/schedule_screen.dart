@@ -5,9 +5,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/class_room_config.dart';
-import '../models/class_schedule.dart';
 import '../services/influxdb_service.dart';
-import '../services/schedule_database_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import '../widgets/app_badge.dart';
@@ -124,25 +122,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         day,
         code,
       );
-
-      final sessionNumbers = <int>[];
-      for (var i = 0; i < code.length; i++) {
-        if (code[i] == '1') {
-          sessionNumbers.add(i + 1);
-        }
-      }
-
-      final weekdayIndex = _weekdays.indexOf(day) + 1;
-      final scheduleObj = ClassSchedule(
-        id: 'sched-${_selectedRoom!.id}-${day.toLowerCase()}',
-        classRoomId: _selectedRoom!.id,
-        title: '$day Schedule',
-        daysOfWeek: [weekdayIndex],
-        sessionNumbers: sessionNumbers,
-        automationEnabled: true,
-      );
-
-      await const ScheduleDatabaseService().uploadSchedule(scheduleObj);
 
       if (mounted) {
         setState(() {
@@ -394,3 +373,28 @@ class _ScheduleFormModalState extends State<_ScheduleFormModal> {
     );
   }
 }
+
+// EDIT_TARGET: lib/screens/schedule_screen.dart
+// EDIT_PURPOSE: Predefined session slots for schedule
+// EDIT_REASON: Moved here from the deleted model to simplify structure
+class ScheduleSession {
+  const ScheduleSession({
+    required this.number,
+    required this.label,
+    required this.timeRange,
+  });
+
+  final int number;
+  final String label;
+  final String timeRange;
+
+  static const List<ScheduleSession> all = [
+    ScheduleSession(number: 1, label: 'Session 1', timeRange: '07:20 - 09:00'),
+    ScheduleSession(number: 2, label: 'Session 2', timeRange: '09:20 - 11:00'),
+    ScheduleSession(number: 3, label: 'Session 3', timeRange: '11:20 - 13:00'),
+    ScheduleSession(number: 4, label: 'Session 4', timeRange: '13:20 - 15:00'),
+    ScheduleSession(number: 5, label: 'Session 5', timeRange: '15:20 - 17:00'),
+    ScheduleSession(number: 6, label: 'Session 6', timeRange: '17:20 - 19:00'),
+  ];
+}
+

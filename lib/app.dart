@@ -134,9 +134,6 @@ class _AppShellState extends State<_AppShell> {
       displayName: 'Class $normalized',
       buildingName: _buildingNameFromRoom(normalized),
       floorName: _floorNameFromRoom(normalized),
-      enabledSensors: const ['temperature', 'lux', 'presence'],
-      detectedSensors: const ['temperature', 'lux', 'presence'],
-      enabledControls: const ['lamp', 'ac', 'projector'],
     );
   }
 

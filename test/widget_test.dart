@@ -3,15 +3,12 @@
 // EDIT_REASON: The default counter test referenced a removed MyApp class
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:smart_building_app/app.dart';
 
 void main() {
   testWidgets('Smart Building app renders auth page before login', (
     tester,
   ) async {
-    SharedPreferences.setMockInitialValues({});
-
     await tester.pumpWidget(const SmartBuildingApp());
     await tester.pumpAndSettle();
 

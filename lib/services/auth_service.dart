@@ -1,21 +1,20 @@
 // EDIT_TARGET: lib/services/auth_service.dart
-// EDIT_PURPOSE: Connects the app auth flow to Firebase Authentication.
-// EDIT_REASON: FSD Section 17 requires Firebase Auth for user identity only.
+// EDIT_PURPOSE: Connects the app auth flow to Firebase Authentication with inlined state properties.
+// EDIT_REASON: FSD Section 17 requires Firebase Auth for user identity only; removed AuthState model to simplify the codebase.
 
 import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-import '../models/auth_state.dart';
-
 class AuthService extends ChangeNotifier {
-  AuthState _state = const AuthState();
+  User? _currentUser;
   FirebaseAuth? _auth;
   String? _lastError;
 
-  AuthState get state => _state;
+  bool get isAuthenticated => _currentUser != null;
+  String? get currentUserId => _currentUser?.uid;
+  String? get currentUserEmail => _currentUser?.email;
 
-  bool get isAuthenticated => _state.isAuthenticated;
 
   String? get lastError => _lastError;
 
@@ -91,15 +90,7 @@ class AuthService extends ChangeNotifier {
   }
 
   void _applyFirebaseUser(User? user) {
-    if (user == null) {
-      _state = const AuthState(isAuthenticated: false);
-      return;
-    }
-    _state = AuthState(
-      currentUserId: user.uid,
-      currentUserEmail: user.email,
-      isAuthenticated: true,
-    );
+    _currentUser = user;
   }
 
   String _messageForAuthException(FirebaseAuthException exception) {
