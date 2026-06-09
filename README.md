@@ -212,6 +212,34 @@ flutterfire configure --project=<firebase-project-id> --platforms=android
 
 ---
 
+## Firebase Auth Initialization Fix
+
+### Problem
+
+The Android login screen could show `Firebase Auth is not ready` even when
+Firebase configuration and user credentials were valid.
+
+Firebase initialization previously ran only once during app startup. If that
+initial attempt was delayed or failed temporarily, the app continued to the
+login screen while `FirebaseAuth` remained unavailable. Pressing Sign In then
+returned the generic readiness error without retrying initialization.
+
+### Fix
+
+- Firebase Auth initialization is now owned by `AuthService`.
+- Sign In retries Firebase initialization when Auth is not ready.
+- Initialization waits for a maximum of five seconds instead of hanging.
+- Login now reports clearer platform, timeout, and project configuration errors.
+- The authentication-state listener is attached after Firebase becomes ready.
+
+### Platform Note
+
+The current `firebase_options.dart` configuration supports Android. Other
+platforms must be added using FlutterFire CLI before Firebase Auth can work on
+those platforms.
+
+---
+
 ## 🧹 Project Rules
 
 ```txt

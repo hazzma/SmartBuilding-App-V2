@@ -2,41 +2,34 @@
 // EDIT_PURPOSE: Connects the app auth flow to Firebase Authentication with inlined state properties.
 // EDIT_REASON: FSD Section 17 requires Firebase Auth for user identity only; removed AuthState model to simplify the codebase.
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../firebase_options.dart';
+
 class AuthService extends ChangeNotifier {
   User? _currentUser;
   FirebaseAuth? _auth;
+  bool _isListeningToAuthChanges = false;
   String? _lastError;
 
   bool get isAuthenticated => _currentUser != null;
   String? get currentUserId => _currentUser?.uid;
   String? get currentUserEmail => _currentUser?.email;
 
-
   String? get lastError => _lastError;
 
   Future<void> load() async {
-    try {
-      if (Firebase.apps.isNotEmpty) {
-        _auth = FirebaseAuth.instance;
-        _applyFirebaseUser(_auth!.currentUser);
-        _auth!.authStateChanges().listen((User? user) {
-          _applyFirebaseUser(user);
-          notifyListeners();
-        });
-      } else {
-        _lastError = 'Firebase is not initialized.';
-        debugPrint(
-          'AuthService: Firebase not initialized. Auth features will be disabled.',
-        );
-      }
-    } catch (e) {
-      _lastError = 'Unable to load authentication.';
-      debugPrint('AuthService load error: $e');
+    final isReady = await _ensureFirebaseAuthReady();
+    if (!isReady) {
+      return;
     }
+
+    _applyFirebaseUser(_auth!.currentUser);
+    _listenToAuthChanges();
   }
 
   Future<bool> signIn(String email, String password) async {
@@ -46,16 +39,18 @@ class AuthService extends ChangeNotifier {
       return false;
     }
 
-    if (_auth == null) {
-      _lastError = 'Firebase Auth is not ready.';
+    if (!await _ensureFirebaseAuthReady()) {
       return false;
     }
+    _listenToAuthChanges();
 
     try {
-      await _auth!.signInWithEmailAndPassword(
+      final credential = await _auth!.signInWithEmailAndPassword(
         email: email.trim(),
         password: password,
       );
+      _applyFirebaseUser(credential.user);
+      notifyListeners();
       return true;
     } on FirebaseAuthException catch (e) {
       _lastError = _messageForAuthException(e);
@@ -87,6 +82,55 @@ class AuthService extends ChangeNotifier {
 
   bool _isValidEmail(String email) {
     return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email.trim());
+  }
+
+  Future<bool> _ensureFirebaseAuthReady() async {
+    if (_auth != null) {
+      return true;
+    }
+
+    try {
+      if (Firebase.apps.isEmpty) {
+        await Firebase.initializeApp(
+          options: DefaultFirebaseOptions.currentPlatform,
+        ).timeout(const Duration(seconds: 5));
+      }
+      _auth = FirebaseAuth.instance;
+      _lastError = null;
+      return true;
+    } on UnsupportedError catch (error) {
+      _lastError =
+          'Firebase Auth is not configured for this platform. Run the app on Android or configure Firebase for this platform.';
+      debugPrint('Firebase platform configuration error: $error');
+      return false;
+    } on FirebaseException catch (error) {
+      _lastError =
+          'Firebase initialization failed (${error.code}). Check the Firebase project configuration.';
+      debugPrint('Firebase initialization error: ${error.code}: $error');
+      return false;
+    } on TimeoutException catch (error) {
+      _lastError =
+          'Firebase initialization timed out. Check the internet connection and Firebase configuration.';
+      debugPrint('Firebase initialization timeout: $error');
+      return false;
+    } catch (error) {
+      _lastError =
+          'Firebase initialization failed. Check the internet connection and Firebase configuration.';
+      debugPrint('Firebase initialization error: $error');
+      return false;
+    }
+  }
+
+  void _listenToAuthChanges() {
+    if (_isListeningToAuthChanges || _auth == null) {
+      return;
+    }
+
+    _isListeningToAuthChanges = true;
+    _auth!.authStateChanges().listen((User? user) {
+      _applyFirebaseUser(user);
+      notifyListeners();
+    });
   }
 
   void _applyFirebaseUser(User? user) {
