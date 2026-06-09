@@ -187,11 +187,11 @@ Top area:
   - Alerts: count of classrooms where `alert` is active.
 
 Middle area:
-- Global/campus-wide All Lights On, All Lights Off, and Match Schedule buttons (trigger snackbars).
+- Global/campus-wide All Lights On and All Lights Off buttons.
 
 Bottom area:
 - Active Alerts list: displays warnings for classrooms with active alerts.
-- Ongoing Classes list: displays classrooms currently active on schedule.
+- Ongoing Classes list: queries the latest `classroom_schedule` fields from InfluxDB, matches the current weekday and predefined session, and refreshes once per minute.
 
 ### 1.7 Classes Screen Requirement (DevicesScreen)
 
@@ -207,6 +207,8 @@ Expanded classroom details:
 - Metric badges displaying `temp`, `Lux`, and `presense` (with values `yes`/`no` or `"-"` for placeholders/no data).
 - Interactive power buttons for LED and Projector.
 - Interactive AC badge that opens the AC Control Dialog.
+- Each sensor/control badge contains an alert icon. The icon is orange when that specific field has an active alert and grey otherwise.
+- The expanded details area does not use a separate classroom-level Alert badge.
 
 ## 2. Flutter Widget Usage Summary
 

@@ -167,7 +167,8 @@ class _DevicesScreenState extends State<DevicesScreen> {
     }
   }
 
-  Future<void> _updateRoomField(String room, String field, dynamic value) async {
+  Future<void> _updateRoomField(
+      String room, String field, dynamic value) async {
     setState(() {
       _loadingDetails.add(room);
     });
@@ -309,14 +310,27 @@ class _RoomDetailsCard extends StatelessWidget {
         spacing: 12,
         runSpacing: 12,
         children: [
-          _MetricBadge(label: 'temp', value: roomData.valueLabel('temp')),
-          _MetricBadge(label: 'Lux', value: roomData.valueLabel('lux')),
-          _MetricBadge(label: 'presense', value: roomData.valueLabel('presense')),
+          _MetricBadge(
+            label: 'temp',
+            value: roomData.valueLabel('temp'),
+            hasAlert: roomData.hasAlertFor('temp'),
+          ),
+          _MetricBadge(
+            label: 'Lux',
+            value: roomData.valueLabel('lux'),
+            hasAlert: roomData.hasAlertFor('lux'),
+          ),
+          _MetricBadge(
+            label: 'presense',
+            value: roomData.valueLabel('presense'),
+            hasAlert: roomData.hasAlertFor('human'),
+          ),
           _InteractiveBadge(
             label: 'LED',
             value: roomData.valueLabel('led'),
             icon: Icons.lightbulb,
             isActive: roomData.led == true,
+            hasAlert: roomData.hasAlertFor('led'),
             onTap: () {
               final nextVal = roomData.led == true ? false : true;
               onFieldChanged(roomData.room, 'led', nextVal);
@@ -327,6 +341,7 @@ class _RoomDetailsCard extends StatelessWidget {
             value: roomData.valueLabel('projector'),
             icon: Icons.videocam,
             isActive: roomData.projector == true,
+            hasAlert: roomData.hasAlertFor('projector'),
             onTap: () {
               final nextVal = roomData.projector == true ? false : true;
               onFieldChanged(roomData.room, 'projector', nextVal);
@@ -337,6 +352,7 @@ class _RoomDetailsCard extends StatelessWidget {
             value: roomData.valueLabel('ac'),
             icon: Icons.ac_unit,
             isActive: roomData.acPower == true,
+            hasAlert: roomData.hasAlertFor('ac'),
             onTap: () {
               showDialog<void>(
                 context: context,
@@ -348,12 +364,6 @@ class _RoomDetailsCard extends StatelessWidget {
                 },
               );
             },
-          ),
-          AppBadge(
-            label: roomData.hasAlert ? 'alert' : 'no alert',
-            type: roomData.hasAlert
-                ? AppBadgeType.warning
-                : AppBadgeType.offline,
           ),
           AppBadge(
             label: roomData.active == true ? 'active' : 'inactive',
@@ -368,10 +378,15 @@ class _RoomDetailsCard extends StatelessWidget {
 }
 
 class _MetricBadge extends StatelessWidget {
-  const _MetricBadge({required this.label, required this.value});
+  const _MetricBadge({
+    required this.label,
+    required this.value,
+    required this.hasAlert,
+  });
 
   final String label;
   final String value;
+  final bool hasAlert;
 
   @override
   Widget build(BuildContext context) {
@@ -386,7 +401,12 @@ class _MetricBadge extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: AppTextStyles.caption),
+          Row(
+            children: [
+              Expanded(child: Text(label, style: AppTextStyles.caption)),
+              _AlertIcon(active: hasAlert),
+            ],
+          ),
           const SizedBox(height: 4),
           Text(value, style: AppTextStyles.bodyMedium),
         ],
@@ -401,6 +421,7 @@ class _InteractiveBadge extends StatelessWidget {
     required this.value,
     required this.icon,
     required this.isActive,
+    required this.hasAlert,
     required this.onTap,
   });
 
@@ -408,6 +429,7 @@ class _InteractiveBadge extends StatelessWidget {
   final String value;
   final IconData icon;
   final bool isActive;
+  final bool hasAlert;
   final VoidCallback onTap;
 
   @override
@@ -419,7 +441,9 @@ class _InteractiveBadge extends StatelessWidget {
         width: 120,
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isActive ? AppColors.primary.withOpacity(0.12) : AppColors.surfaceSoft,
+          color: isActive
+              ? AppColors.primary.withValues(alpha: 0.12)
+              : AppColors.surfaceSoft,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: isActive ? AppColors.primary : AppColors.border,
@@ -430,9 +454,10 @@ class _InteractiveBadge extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(label, style: AppTextStyles.caption),
+                Expanded(child: Text(label, style: AppTextStyles.caption)),
+                _AlertIcon(active: hasAlert),
+                const SizedBox(width: 6),
                 Icon(
                   icon,
                   size: 16,
@@ -450,6 +475,24 @@ class _InteractiveBadge extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _AlertIcon extends StatelessWidget {
+  const _AlertIcon({required this.active});
+
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: active ? 'Active alert' : 'No active alert',
+      child: Icon(
+        Icons.warning_amber_outlined,
+        size: 16,
+        color: active ? AppColors.warning : AppColors.offline,
       ),
     );
   }
@@ -501,7 +544,7 @@ class _AcControlDialogState extends State<_AcControlDialog> {
               SwitchListTile(
                 title: const Text('Power'),
                 value: _power,
-                activeColor: AppColors.success,
+                activeThumbColor: AppColors.success,
                 onChanged: (val) {
                   setState(() {
                     _power = val;
@@ -542,7 +585,7 @@ class _AcControlDialogState extends State<_AcControlDialog> {
                     labelText: 'Fan Speed',
                     border: OutlineInputBorder(),
                   ),
-                  value: _fan == 99 ? 0 : _fan,
+                  initialValue: _fan == 99 ? 0 : _fan,
                   items: const [
                     DropdownMenuItem(value: 0, child: Text('Auto')),
                     DropdownMenuItem(value: 1, child: Text('Low')),
@@ -581,7 +624,8 @@ class _AcControlDialogState extends State<_AcControlDialog> {
           },
           style: FilledButton.styleFrom(
             backgroundColor: AppColors.primary,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
           child: const Text('Apply'),
         ),

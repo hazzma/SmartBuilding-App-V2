@@ -8,7 +8,6 @@ import '../models/class_room_config.dart';
 import '../services/influxdb_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
-import '../widgets/app_badge.dart';
 import '../widgets/app_button.dart';
 import '../widgets/app_card.dart';
 
@@ -60,13 +59,15 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       _loadSchedule();
     }
     if (widget.rooms.isNotEmpty) {
-      if (_selectedRoom == null || !widget.rooms.any((r) => r.id == _selectedRoom!.id)) {
+      if (_selectedRoom == null ||
+          !widget.rooms.any((r) => r.id == _selectedRoom!.id)) {
         setState(() {
           _selectedRoom = widget.rooms.first;
         });
         _loadSchedule();
       } else {
-        final updatedRoom = widget.rooms.firstWhere((r) => r.id == _selectedRoom!.id);
+        final updatedRoom =
+            widget.rooms.firstWhere((r) => r.id == _selectedRoom!.id);
         if (updatedRoom != _selectedRoom) {
           setState(() {
             _selectedRoom = updatedRoom;
@@ -84,7 +85,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     });
 
     try {
-      final schedule = await widget.influxDbService.loadClassroomSchedule(_selectedRoom!.className);
+      final schedule = await widget.influxDbService
+          .loadClassroomSchedule(_selectedRoom!.className);
       if (mounted) {
         setState(() {
           _scheduleData = schedule;
@@ -169,7 +171,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       .toList(),
                   onChanged: (roomId) {
                     if (roomId != null) {
-                      final room = widget.rooms.firstWhere((r) => r.id == roomId);
+                      final room =
+                          widget.rooms.firstWhere((r) => r.id == roomId);
                       setState(() {
                         _selectedRoom = room;
                       });
@@ -219,7 +222,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(day, style: AppTextStyles.sectionTitle),
+                                    Text(day,
+                                        style: AppTextStyles.sectionTitle),
                                     const SizedBox(height: 8),
                                     if (activeSessions.isEmpty)
                                       const Text(
@@ -234,12 +238,14 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                                           return Chip(
                                             label: Text(
                                               '${session.label} (${session.timeRange})',
-                                              style: AppTextStyles.caption.copyWith(
+                                              style: AppTextStyles.caption
+                                                  .copyWith(
                                                 color: AppColors.primary,
                                                 fontWeight: FontWeight.bold,
                                               ),
                                             ),
-                                            backgroundColor: AppColors.surfaceSoft,
+                                            backgroundColor:
+                                                AppColors.surfaceSoft,
                                           );
                                         }).toList(),
                                       ),
@@ -247,8 +253,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                                 ),
                               ),
                               IconButton(
-                                icon: const Icon(Icons.edit_outlined, color: AppColors.primary),
-                                onPressed: () => _openEditScheduleDialog(day, code),
+                                icon: const Icon(Icons.edit_outlined,
+                                    color: AppColors.primary),
+                                onPressed: () =>
+                                    _openEditScheduleDialog(day, code),
                               ),
                             ],
                           ),
@@ -337,7 +345,8 @@ class _ScheduleFormModalState extends State<_ScheduleFormModal> {
                   contentPadding: EdgeInsets.zero,
                   dense: true,
                   title: Text(session.label, style: AppTextStyles.bodyMedium),
-                  subtitle: Text(session.timeRange, style: AppTextStyles.caption),
+                  subtitle:
+                      Text(session.timeRange, style: AppTextStyles.caption),
                   onChanged: (val) {
                     setState(() {
                       if (val == true) {
@@ -397,4 +406,3 @@ class ScheduleSession {
     ScheduleSession(number: 6, label: 'Session 6', timeRange: '17:20 - 19:00'),
   ];
 }
-

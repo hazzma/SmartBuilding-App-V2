@@ -41,16 +41,103 @@ class InfluxRoomData {
     if (alert is bool) return alert as bool;
     if (alert is num) return alert != 0;
     final str = alert.toString().trim();
-    return str.isNotEmpty && str != '0' && str != 'false' && !RegExp(r'^0+$').hasMatch(str);
+    return str.isNotEmpty &&
+        str != '0' &&
+        str != 'false' &&
+        !RegExp(r'^0+$').hasMatch(str);
   }
 
   bool get isActive => active == true;
   bool get isOccupied => human == true;
 
+  bool hasAlertFor(String field) {
+    final flags = alertFlags;
+    if (flags.isEmpty) {
+      return false;
+    }
+    if (flags.contains('general')) {
+      return const {
+        'temp',
+        'lux',
+        'human',
+        'led',
+        'projector',
+        'ac',
+      }.contains(field);
+    }
+    return flags.contains(field);
+  }
+
+  Set<String> get alertFlags {
+    if (!hasAlert) {
+      return const <String>{};
+    }
+
+    final text = alert.toString().trim().toLowerCase();
+    if (text == 'true' || text == '1') {
+      return const {'general'};
+    }
+
+    final digits = text.replaceAll(RegExp(r'[^01]'), '');
+    if (digits.isEmpty) {
+      return const {'general'};
+    }
+    if (alert is num || digits.length >= 8) {
+      final padded = digits.padLeft(8, '0');
+      return {
+        if (padded[0] == '1') 'temp',
+        if (padded[2] == '1') 'lux',
+        if (padded[3] == '1') 'human',
+        if (padded[4] == '1') 'led',
+        if (padded[5] == '1') 'projector',
+        if (padded[6] == '1') 'ac',
+        if (padded[7] == '1') 'presenceOutsideSchedule',
+      };
+    }
+
+    if (digits.length == 7) {
+      return {
+        if (digits[0] == '1') 'temp',
+        if (digits[2] == '1') 'lux',
+        if (digits[3] == '1') 'human',
+        if (digits[4] == '1') 'led',
+        if (digits[5] == '1') 'projector',
+        if (digits[6] == '1') 'presenceOutsideSchedule',
+      };
+    }
+
+    final padded = digits.padRight(6, '0');
+    return {
+      if (padded[0] == '1') 'temp',
+      if (padded[1] == '1') 'lux',
+      if (padded[2] == '1') 'human',
+      if (padded[3] == '1') 'led',
+      if (padded[4] == '1') 'projector',
+      if (padded[5] == '1') 'ac',
+    };
+  }
+
+  List<String> get alertLabels {
+    final flags = alertFlags;
+    if (flags.contains('general')) {
+      return const ['General alert'];
+    }
+    return [
+      if (flags.contains('temp')) 'Temperature error',
+      if (flags.contains('lux')) 'Lux error',
+      if (flags.contains('human')) 'Presence error',
+      if (flags.contains('led')) 'LED error',
+      if (flags.contains('projector')) 'Projector error',
+      if (flags.contains('ac')) 'AC error',
+      if (flags.contains('presenceOutsideSchedule'))
+        'Presence outside schedule',
+    ];
+  }
+
   String get acDisplay {
     if (acPower == null) return '-';
     if (acPower == false) return 'off';
-    
+
     if (acTemp != null && acFan != null) {
       final fanLabel = switch (acFan) {
         0 => 'Auto',
@@ -185,4 +272,113 @@ class InfluxHomeSummary {
   final int totalClasses;
   final int activeClasses;
   final int alertCount;
+}
+
+class InfluxOngoingClass {
+  const InfluxOngoingClass({
+    required this.room,
+    required this.session,
+  });
+
+  final String room;
+  final InfluxScheduleSession session;
+}
+
+class InfluxScheduleSession {
+  const InfluxScheduleSession({
+    required this.number,
+    required this.startHour,
+    required this.startMinute,
+    required this.endHour,
+    required this.endMinute,
+  });
+
+  final int number;
+  final int startHour;
+  final int startMinute;
+  final int endHour;
+  final int endMinute;
+
+  String get label => 'Session $number';
+
+  String get timeRange {
+    String time(int hour, int minute) {
+      return '${hour.toString().padLeft(2, '0')}:'
+          '${minute.toString().padLeft(2, '0')}';
+    }
+
+    return '${time(startHour, startMinute)} - ${time(endHour, endMinute)}';
+  }
+
+  bool contains(DateTime dateTime) {
+    final start = DateTime(
+      dateTime.year,
+      dateTime.month,
+      dateTime.day,
+      startHour,
+      startMinute,
+    );
+    final end = DateTime(
+      dateTime.year,
+      dateTime.month,
+      dateTime.day,
+      endHour,
+      endMinute,
+    );
+    return !dateTime.isBefore(start) && dateTime.isBefore(end);
+  }
+
+  static const List<InfluxScheduleSession> all = [
+    InfluxScheduleSession(
+      number: 1,
+      startHour: 7,
+      startMinute: 20,
+      endHour: 9,
+      endMinute: 0,
+    ),
+    InfluxScheduleSession(
+      number: 2,
+      startHour: 9,
+      startMinute: 20,
+      endHour: 11,
+      endMinute: 0,
+    ),
+    InfluxScheduleSession(
+      number: 3,
+      startHour: 11,
+      startMinute: 20,
+      endHour: 13,
+      endMinute: 0,
+    ),
+    InfluxScheduleSession(
+      number: 4,
+      startHour: 13,
+      startMinute: 20,
+      endHour: 15,
+      endMinute: 0,
+    ),
+    InfluxScheduleSession(
+      number: 5,
+      startHour: 15,
+      startMinute: 20,
+      endHour: 17,
+      endMinute: 0,
+    ),
+    InfluxScheduleSession(
+      number: 6,
+      startHour: 17,
+      startMinute: 20,
+      endHour: 19,
+      endMinute: 0,
+    ),
+  ];
+
+  static InfluxScheduleSession? at(DateTime dateTime) {
+    for (final session in all) {
+      if (session.contains(dateTime)) {
+        return session;
+      }
+    }
+    return null;
+  }
 }

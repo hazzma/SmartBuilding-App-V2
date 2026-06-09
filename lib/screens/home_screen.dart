@@ -2,6 +2,8 @@
 // EDIT_PURPOSE: Campus overview, global lighting controls, ongoing classes and active alerts
 // EDIT_REASON: Home should focus on global status instead of classroom-specific detail panels
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models/class_room_config.dart';
@@ -30,16 +32,28 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   bool? _campusLightsOn;
-  bool _lightsMatchSchedule = false;
   InfluxHomeSummary? _summary;
   List<InfluxRoomData> _allRoomsData = [];
+  List<InfluxOngoingClass> _ongoingClasses = [];
   bool _isLoading = false;
+  bool _isUpdatingCampusLights = false;
   String? _loadError;
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     _loadHomeData();
+    _refreshTimer = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => _loadHomeData(showLoading: false),
+    );
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -81,10 +95,9 @@ class _HomeScreenState extends State<HomeScreen> {
         const SizedBox(height: 8),
         _CampusLightingControls(
           campusLightsOn: _campusLightsOn,
-          lightsMatchSchedule: _lightsMatchSchedule,
+          isUpdating: _isUpdatingCampusLights,
           onTurnOn: () => _setCampusLights(true),
           onTurnOff: () => _setCampusLights(false),
-          onMatchSchedule: _matchLightsToSchedule,
         ),
         const SizedBox(height: 20),
         const _SectionTitle('Active Alerts'),
@@ -93,26 +106,41 @@ class _HomeScreenState extends State<HomeScreen> {
         const SizedBox(height: 20),
         const _SectionTitle('Ongoing Classes'),
         const SizedBox(height: 8),
-        _OngoingClassesList(roomsData: _allRoomsData),
+        _OngoingClassesList(ongoingClasses: _ongoingClasses),
       ],
     );
   }
 
-  Future<void> _loadHomeData() async {
-    setState(() {
-      _isLoading = true;
-      _loadError = null;
-    });
+  Future<void> _loadHomeData({bool showLoading = true}) async {
+    if (showLoading) {
+      setState(() {
+        _isLoading = true;
+        _loadError = null;
+      });
+    }
 
     try {
-      final summary = await widget.influxDbService.loadHomeSummary();
-      final indicators = await widget.influxDbService.loadRoomIndicators();
+      final results = await Future.wait<Object>([
+        widget.influxDbService.loadRooms(),
+        widget.influxDbService.loadRoomIndicators(),
+        widget.influxDbService.loadOngoingClasses(),
+      ]);
+      final rooms = results[0] as List<String>;
+      final indicators = results[1] as Map<String, InfluxRoomData>;
+      final ongoingClasses = results[2] as List<InfluxOngoingClass>;
+      final summary = InfluxHomeSummary(
+        totalClasses: rooms.length,
+        activeClasses: ongoingClasses.length,
+        alertCount: indicators.values.where((room) => room.hasAlert).length,
+      );
       if (!mounted) {
         return;
       }
       setState(() {
         _summary = summary;
         _allRoomsData = indicators.values.toList();
+        _ongoingClasses = ongoingClasses;
+        _loadError = null;
       });
     } catch (error) {
       if (!mounted) {
@@ -120,38 +148,45 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       setState(() => _loadError = error.toString());
     } finally {
-      if (mounted) {
+      if (mounted && showLoading) {
         setState(() => _isLoading = false);
       }
     }
   }
 
-  void _setCampusLights(bool turnOn) {
-    setState(() {
-      _campusLightsOn = turnOn;
-      _lightsMatchSchedule = false;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          turnOn
-              ? 'Dummy action: all campus lights turned on.'
-              : 'Dummy action: all campus lights turned off.',
-        ),
-      ),
-    );
-  }
+  Future<void> _setCampusLights(bool turnOn) async {
+    if (_isUpdatingCampusLights) {
+      return;
+    }
 
-  void _matchLightsToSchedule() {
-    setState(() {
-      _campusLightsOn = null;
-      _lightsMatchSchedule = true;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Dummy action: all lights now match schedule.'),
-      ),
-    );
+    setState(() => _isUpdatingCampusLights = true);
+    try {
+      await widget.influxDbService.writeCampusLights(turnOn);
+      if (!mounted) {
+        return;
+      }
+      setState(() => _campusLightsOn = turnOn);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            turnOn
+                ? 'All campus lights turned on.'
+                : 'All campus lights turned off.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to update campus lights: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isUpdatingCampusLights = false);
+      }
+    }
   }
 }
 
@@ -235,15 +270,13 @@ class _SummaryBlock extends StatelessWidget {
 }
 
 class _OngoingClassesList extends StatelessWidget {
-  const _OngoingClassesList({required this.roomsData});
+  const _OngoingClassesList({required this.ongoingClasses});
 
-  final List<InfluxRoomData> roomsData;
+  final List<InfluxOngoingClass> ongoingClasses;
 
   @override
   Widget build(BuildContext context) {
-    final activeRooms = roomsData.where((r) => r.isActive).toList();
-
-    if (activeRooms.isEmpty) {
+    if (ongoingClasses.isEmpty) {
       return const AppCard(
         child: Row(
           children: [
@@ -256,7 +289,7 @@ class _OngoingClassesList extends StatelessWidget {
     }
 
     return Column(
-      children: activeRooms.map((roomData) {
+      children: ongoingClasses.map((ongoingClass) {
         return AppCard(
           margin: const EdgeInsets.only(bottom: 8),
           child: Row(
@@ -268,10 +301,15 @@ class _OngoingClassesList extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Classroom ${roomData.room}',
-                      style: AppTextStyles.bodyMedium.copyWith(fontWeight: FontWeight.bold),
+                      'Classroom ${ongoingClass.room}',
+                      style: AppTextStyles.bodyMedium
+                          .copyWith(fontWeight: FontWeight.bold),
                     ),
-                    const Text('Class is currently in progress', style: AppTextStyles.caption),
+                    Text(
+                      '${ongoingClass.session.label} '
+                      '(${ongoingClass.session.timeRange})',
+                      style: AppTextStyles.caption,
+                    ),
                   ],
                 ),
               ),
@@ -310,13 +348,14 @@ class _ActiveAlertsList extends StatelessWidget {
 
     return Column(
       children: alertRooms.map((roomData) {
-        final alerts = _decodeAlertCode(roomData.alert);
+        final alerts = roomData.alertLabels;
         return AppCard(
           margin: const EdgeInsets.only(bottom: 8),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.warning_amber_outlined, color: AppColors.warning),
+              const Icon(Icons.warning_amber_outlined,
+                  color: AppColors.warning),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -324,12 +363,14 @@ class _ActiveAlertsList extends StatelessWidget {
                   children: [
                     Text(
                       'Alert in Classroom ${roomData.room}',
-                      style: AppTextStyles.bodyMedium.copyWith(fontWeight: FontWeight.bold),
+                      style: AppTextStyles.bodyMedium
+                          .copyWith(fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      alerts.join(', '),
-                      style: AppTextStyles.caption.copyWith(color: AppColors.error),
+                      alerts.isEmpty ? 'General alert' : alerts.join(', '),
+                      style: AppTextStyles.caption
+                          .copyWith(color: AppColors.error),
                     ),
                   ],
                 ),
@@ -339,47 +380,6 @@ class _ActiveAlertsList extends StatelessWidget {
         );
       }).toList(),
     );
-  }
-
-  List<String> _decodeAlertCode(dynamic alertValue) {
-    if (alertValue == null) return [];
-    if (alertValue == 0 || alertValue == false || alertValue == '0') return [];
-
-    final alertStr = alertValue.toString().trim();
-    if (alertStr == 'true' || (alertStr == '1' && alertStr.length == 1)) {
-      return ['General Alert'];
-    }
-
-    final flags = [
-      'Temperature error',
-      'CO2 error',
-      'Lux error',
-      'Human error',
-      'LED error',
-      'Projector error',
-      'AC error',
-      'Presence outside schedule',
-    ];
-
-    final activeAlerts = <String>[];
-    if (alertStr.length == 7) {
-      for (var i = 0; i < 6; i++) {
-        if (alertStr[i] == '1') {
-          activeAlerts.add(flags[i]);
-        }
-      }
-      if (alertStr[6] == '1') {
-        activeAlerts.add(flags[7]);
-      }
-    } else {
-      final padded = alertStr.padLeft(8, '0');
-      for (var i = 0; i < padded.length && i < flags.length; i++) {
-        if (padded[i] == '1') {
-          activeAlerts.add(flags[i]);
-        }
-      }
-    }
-    return activeAlerts;
   }
 }
 
@@ -418,17 +418,15 @@ class _ErrorCard extends StatelessWidget {
 class _CampusLightingControls extends StatelessWidget {
   const _CampusLightingControls({
     required this.campusLightsOn,
-    required this.lightsMatchSchedule,
+    required this.isUpdating,
     required this.onTurnOn,
     required this.onTurnOff,
-    required this.onMatchSchedule,
   });
 
   final bool? campusLightsOn;
-  final bool lightsMatchSchedule;
+  final bool isUpdating;
   final VoidCallback onTurnOn;
   final VoidCallback onTurnOff;
-  final VoidCallback onMatchSchedule;
 
   @override
   Widget build(BuildContext context) {
@@ -448,13 +446,13 @@ class _CampusLightingControls extends StatelessWidget {
               ),
               AppBadge(
                 label: switch (campusLightsOn) {
-                  _ when lightsMatchSchedule => 'schedule',
+                  _ when isUpdating => 'updating',
                   true => 'all on',
                   false => 'all off',
                   null => 'not set',
                 },
                 type: switch (campusLightsOn) {
-                  _ when lightsMatchSchedule => AppBadgeType.warning,
+                  _ when isUpdating => AppBadgeType.warning,
                   true => AppBadgeType.online,
                   false => AppBadgeType.error,
                   null => AppBadgeType.offline,
@@ -470,21 +468,14 @@ class _CampusLightingControls extends StatelessWidget {
                 label: 'All Lights On',
                 icon: Icons.lightbulb,
                 color: AppColors.success,
-                onPressed: onTurnOn,
+                onPressed: isUpdating ? null : onTurnOn,
               );
               final turnOffButton = _CampusLightButton(
                 label: 'All Lights Off',
                 icon: Icons.lightbulb_outline,
                 color: AppColors.error,
-                onPressed: onTurnOff,
+                onPressed: isUpdating ? null : onTurnOff,
               );
-              final scheduleButton = _CampusLightButton(
-                label: 'All Lights Match Schedule',
-                icon: Icons.event_available,
-                color: AppColors.primary,
-                onPressed: onMatchSchedule,
-              );
-
               if (stackButtons) {
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -492,8 +483,6 @@ class _CampusLightingControls extends StatelessWidget {
                     turnOnButton,
                     const SizedBox(height: 10),
                     turnOffButton,
-                    const SizedBox(height: 10),
-                    scheduleButton,
                   ],
                 );
               }
@@ -503,8 +492,6 @@ class _CampusLightingControls extends StatelessWidget {
                   Expanded(child: turnOnButton),
                   const SizedBox(width: 12),
                   Expanded(child: turnOffButton),
-                  const SizedBox(width: 12),
-                  Expanded(child: scheduleButton),
                 ],
               );
             },
@@ -526,7 +513,7 @@ class _CampusLightButton extends StatelessWidget {
   final String label;
   final IconData icon;
   final Color color;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {

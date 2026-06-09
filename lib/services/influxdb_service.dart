@@ -28,11 +28,63 @@ class InfluxDbService {
   Future<InfluxHomeSummary> loadHomeSummary() async {
     final rooms = await loadRooms();
     final indicators = await loadRoomIndicators();
+    final ongoingClasses = await loadOngoingClasses();
     return InfluxHomeSummary(
       totalClasses: rooms.length,
-      activeClasses: indicators.values.where((room) => room.isActive).length,
+      activeClasses: ongoingClasses.length,
       alertCount: indicators.values.where((room) => room.hasAlert).length,
     );
+  }
+
+  // Queries today's schedule bitmask and returns rooms in the current session.
+  Future<List<InfluxOngoingClass>> loadOngoingClasses({
+    DateTime? currentTime,
+  }) async {
+    final now = currentTime ?? DateTime.now();
+    final session = InfluxScheduleSession.at(now);
+    if (session == null) {
+      return const <InfluxOngoingClass>[];
+    }
+
+    final dayName = const [
+      'monday',
+      'tuesday',
+      'wednesday',
+      'thursday',
+      'friday',
+      'saturday',
+      'sunday',
+    ][now.weekday - 1];
+    final rows = await _query('''
+from(bucket: "$bucket")
+  |> range(start: -30d)
+  |> filter(fn: (r) => r._measurement == "classroom_schedule")
+  |> group(columns: ["room", "_field"])
+  |> last()
+''');
+
+    final latestCodesByRoom = <String, String>{};
+    for (final row in rows) {
+      final room = row['room'];
+      final field = row['_field'];
+      final value = row['_value'];
+      if (room == null ||
+          field == null ||
+          value == null ||
+          field.toLowerCase() != dayName) {
+        continue;
+      }
+      latestCodesByRoom[room] = _normalizeScheduleCode(value);
+    }
+
+    final sessionIndex = session.number - 1;
+    final ongoingClasses = [
+      for (final entry in latestCodesByRoom.entries)
+        if (entry.value.length > sessionIndex &&
+            entry.value[sessionIndex] == '1')
+          InfluxOngoingClass(room: entry.key, session: session),
+    ]..sort((a, b) => a.room.compareTo(b.room));
+    return ongoingClasses;
   }
 
   Future<List<String>> loadRooms() async {
@@ -57,12 +109,24 @@ schema.tagValues(
   }
 
   Future<Map<String, InfluxRoomData>> loadRoomIndicators() {
-    return _loadLatestFieldsByRoom(const ['human', 'presence', 'motion', 'alert', 'active']);
+    return _loadLatestFieldsByRoom(
+        const ['human', 'presence', 'motion', 'alert', 'active']);
   }
 
   Future<InfluxRoomData?> loadRoomDetails(String room) async {
     final rooms = await _loadLatestFieldsByRoom(
-      const ['temp', 'lux', 'human', 'presence', 'motion', 'led', 'projector', 'ac', 'alert', 'active'],
+      const [
+        'temp',
+        'lux',
+        'human',
+        'presence',
+        'motion',
+        'led',
+        'projector',
+        'ac',
+        'alert',
+        'active'
+      ],
       room: room,
     );
     return rooms[room];
@@ -72,8 +136,11 @@ schema.tagValues(
     List<String> fields, {
     String? room,
   }) async {
-    final fieldFilter = fields.map((field) => 'r._field == "$field"').join(' or ');
-    final roomFilter = room == null ? '' : '  |> filter(fn: (r) => r.room == "${_escapeFlux(room)}")\n';
+    final fieldFilter =
+        fields.map((field) => 'r._field == "$field"').join(' or ');
+    final roomFilter = room == null
+        ? ''
+        : '  |> filter(fn: (r) => r.room == "${_escapeFlux(room)}")\n';
     final rows = await _query('''
 from(bucket: "$bucket")
   |> range(start: -30d)
@@ -120,7 +187,8 @@ $roomFilter  |> group(columns: ["room", "_field"])
       final body = await response.transform(utf8.decoder).join();
       debugPrint('Raw InfluxDB response:\n$body');
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw InfluxDbException('InfluxDB query failed: ${response.statusCode} $body');
+        throw InfluxDbException(
+            'InfluxDB query failed: ${response.statusCode} $body');
       }
       return _parseAnnotatedCsv(body);
     } finally {
@@ -143,13 +211,15 @@ $roomFilter  |> group(columns: ["room", "_field"])
       final response = await request.close();
       final body = await response.transform(utf8.decoder).join();
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw InfluxDbException('InfluxDB org lookup failed: ${response.statusCode} $body');
+        throw InfluxDbException(
+            'InfluxDB org lookup failed: ${response.statusCode} $body');
       }
 
       final decoded = jsonDecode(body) as Map<String, dynamic>;
       final orgs = decoded['orgs'] as List<dynamic>? ?? const [];
       if (orgs.isEmpty) {
-        throw const InfluxDbException('No InfluxDB orgs are available for this token.');
+        throw const InfluxDbException(
+            'No InfluxDB orgs are available for this token.');
       }
       final firstOrg = orgs.first as Map<String, dynamic>;
       _org = (firstOrg['name'] ?? firstOrg['id']).toString();
@@ -237,15 +307,6 @@ $roomFilter  |> group(columns: ["room", "_field"])
   }
 
   Future<void> writeRoomField(String room, String field, dynamic value) async {
-    final org = await _resolveOrg();
-    final writeUri = _baseUri().replace(
-      path: '${_baseUri().path}/api/v2/write'.replaceAll('//', '/'),
-      queryParameters: {
-        'org': org,
-        'bucket': bucket,
-      },
-    );
-
     String valueStr;
     if (value is bool) {
       valueStr = value ? '1' : '0';
@@ -266,7 +327,52 @@ $roomFilter  |> group(columns: ["room", "_field"])
       valueStr = value.toString();
     }
 
-    final line = 'classroom,room=${_escapeFluxTag(room)} $field=$valueStr';
+    final line = '$measurement,room=${_escapeFluxTag(room)} $field=$valueStr';
+    await _writeLineProtocol(line);
+  }
+
+  Future<void> writeCampusLights(bool turnOn) async {
+    final rows = await _query('''
+import "influxdata/influxdb/schema"
+schema.tagValues(
+  bucket: "$bucket",
+  tag: "room",
+  predicate: (r) => r._measurement == "$measurement",
+  start: 1970-01-01T00:00:00Z,
+)
+''');
+    final rooms = rows
+        .map((row) => row['_value'] ?? row['room'])
+        .whereType<String>()
+        .where((room) => room.isNotEmpty && room != 'rooms')
+        .toSet()
+        .toList()
+      ..sort();
+
+    if (rooms.isEmpty) {
+      throw const InfluxDbException(
+        'No classroom room tags were found for the campus light command.',
+      );
+    }
+
+    final ledValue = turnOn ? 1 : 0;
+    final lines = rooms
+        .map(
+          (room) => '$measurement,room=${_escapeFluxTag(room)} led=$ledValue',
+        )
+        .join('\n');
+    await _writeLineProtocol(lines);
+  }
+
+  Future<void> _writeLineProtocol(String lines) async {
+    final org = await _resolveOrg();
+    final writeUri = _baseUri().replace(
+      path: '${_baseUri().path}/api/v2/write'.replaceAll('//', '/'),
+      queryParameters: {
+        'org': org,
+        'bucket': bucket,
+      },
+    );
 
     final client = HttpClient();
     try {
@@ -274,12 +380,14 @@ $roomFilter  |> group(columns: ["room", "_field"])
       request.headers
         ..set(HttpHeaders.authorizationHeader, 'Token $token')
         ..set(HttpHeaders.contentTypeHeader, 'text/plain; charset=utf-8');
-      request.write(line);
+      request.write(lines);
 
       final response = await request.close();
       final body = await response.transform(utf8.decoder).join();
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw InfluxDbException('InfluxDB write failed: ${response.statusCode} $body');
+        throw InfluxDbException(
+          'InfluxDB write failed: ${response.statusCode} $body',
+        );
       }
     } finally {
       client.close(force: true);
@@ -331,7 +439,8 @@ from(bucket: "$bucket")
     return str;
   }
 
-  Future<void> writeClassroomSchedule(String room, String dayOfWeek, String code) async {
+  Future<void> writeClassroomSchedule(
+      String room, String dayOfWeek, String code) async {
     final org = await _resolveOrg();
     final writeUri = _baseUri().replace(
       path: '${_baseUri().path}/api/v2/write'.replaceAll('//', '/'),
@@ -342,7 +451,8 @@ from(bucket: "$bucket")
     );
 
     final intCode = int.tryParse(code) ?? 0;
-    final line = 'classroom_schedule,room=${_escapeFluxTag(room)} $dayOfWeek=$intCode';
+    final line =
+        'classroom_schedule,room=${_escapeFluxTag(room)} $dayOfWeek=$intCode';
 
     final client = HttpClient();
     try {
@@ -355,7 +465,8 @@ from(bucket: "$bucket")
       final response = await request.close();
       final body = await response.transform(utf8.decoder).join();
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw InfluxDbException('InfluxDB schedule write failed: ${response.statusCode} $body');
+        throw InfluxDbException(
+            'InfluxDB schedule write failed: ${response.statusCode} $body');
       }
     } finally {
       client.close(force: true);
@@ -363,7 +474,10 @@ from(bucket: "$bucket")
   }
 
   String _escapeFluxTag(String value) {
-    return value.replaceAll(' ', r'\ ').replaceAll(',', r'\,').replaceAll('=', r'\=');
+    return value
+        .replaceAll(' ', r'\ ')
+        .replaceAll(',', r'\,')
+        .replaceAll('=', r'\=');
   }
 
   String _escapeFlux(String value) {
