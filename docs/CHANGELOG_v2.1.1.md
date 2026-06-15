@@ -13,6 +13,8 @@ QoL fixes and tiny implementations.
 ## Changed
 
 - Home screen simplified, class-specific control removed. 
+- Schedule Changed to "calendar_date_picker2 3.0.0" pub.dev library
+- Dates translated
 
 ## Removed
 
