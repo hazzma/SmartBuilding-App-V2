@@ -19,12 +19,16 @@ class DevicesScreen extends StatefulWidget {
     required this.influxDbService,
     required this.isActive,
     required this.refreshSignal,
+    required this.focusedRoom,
+    required this.focusSignal,
   });
 
   final List<ClassRoomConfig> rooms;
   final InfluxDbService influxDbService;
   final bool isActive;
   final int refreshSignal;
+  final String? focusedRoom;
+  final int focusSignal;
 
   @override
   State<DevicesScreen> createState() => _DevicesScreenState();
@@ -32,6 +36,8 @@ class DevicesScreen extends StatefulWidget {
 
 class _DevicesScreenState extends State<DevicesScreen> {
   String? _expandedRoom;
+  final Set<String> _expandedBuildings = <String>{};
+  final Set<String> _expandedFloors = <String>{};
   bool _loadingIndicators = false;
   String? _loadError;
   Map<String, InfluxRoomData> _indicatorsByRoom = <String, InfluxRoomData>{};
@@ -57,11 +63,17 @@ class _DevicesScreenState extends State<DevicesScreen> {
         _loadRoomDetails(_expandedRoom!);
       }
     }
+    if (widget.isActive &&
+        widget.focusSignal != oldWidget.focusSignal &&
+        widget.focusedRoom != null) {
+      _focusRoom(widget.focusedRoom!);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final rooms = widget.rooms;
+    final groupedRooms = _groupRooms(rooms);
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -95,25 +107,119 @@ class _DevicesScreenState extends State<DevicesScreen> {
             ),
           )
         else
-          for (final room in rooms) ...[
-            _ClassroomCard(
-              room: room,
-              data: _indicatorsByRoom[room.className],
-              isExpanded: _expandedRoom == room.className,
-              onTap: () => _toggleRoom(room.className),
+          for (final buildingEntry in groupedRooms.entries) ...[
+            _HierarchyHeader(
+              icon: Icons.apartment_outlined,
+              label: buildingEntry.key,
+              count: buildingEntry.value.values
+                  .fold<int>(0, (count, rooms) => count + rooms.length),
+              isExpanded: _expandedBuildings.contains(buildingEntry.key),
+              onTap: () => _toggleBuilding(buildingEntry.key),
             ),
-            if (_expandedRoom == room.className) ...[
-              const SizedBox(height: 8),
-              _RoomDetailsCard(
-                data: _detailsByRoom[room.className],
-                isLoading: _loadingDetails.contains(room.className),
-                onFieldChanged: _updateRoomField,
-              ),
-            ],
+            if (_expandedBuildings.contains(buildingEntry.key))
+              for (final floorEntry in buildingEntry.value.entries) ...[
+                Padding(
+                  padding: const EdgeInsets.only(left: 16, top: 8),
+                  child: _HierarchyHeader(
+                    icon: Icons.layers_outlined,
+                    label: floorEntry.key,
+                    count: floorEntry.value.length,
+                    isExpanded: _expandedFloors.contains(
+                      _floorKey(buildingEntry.key, floorEntry.key),
+                    ),
+                    onTap: () => _toggleFloor(
+                      buildingEntry.key,
+                      floorEntry.key,
+                    ),
+                  ),
+                ),
+                if (_expandedFloors.contains(
+                  _floorKey(buildingEntry.key, floorEntry.key),
+                ))
+                  for (final room in floorEntry.value) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(left: 32, top: 8),
+                      child: _ClassroomCard(
+                        room: room,
+                        data: _indicatorsByRoom[room.className],
+                        isExpanded: _expandedRoom == room.className,
+                        onTap: () => _toggleRoom(room.className),
+                      ),
+                    ),
+                    if (_expandedRoom == room.className)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 32, top: 8),
+                        child: _RoomDetailsCard(
+                          data: _detailsByRoom[room.className],
+                          isLoading: _loadingDetails.contains(room.className),
+                          onFieldChanged: _updateRoomField,
+                        ),
+                      ),
+                  ],
+              ],
             const SizedBox(height: 12),
           ],
       ],
     );
+  }
+
+  Map<String, Map<String, List<ClassRoomConfig>>> _groupRooms(
+    List<ClassRoomConfig> rooms,
+  ) {
+    final grouped = <String, Map<String, List<ClassRoomConfig>>>{};
+    final sortedRooms = [...rooms]
+      ..sort((a, b) => a.className.compareTo(b.className));
+    for (final room in sortedRooms) {
+      grouped
+          .putIfAbsent(
+            room.buildingName,
+            () => <String, List<ClassRoomConfig>>{},
+          )
+          .putIfAbsent(room.floorName, () => <ClassRoomConfig>[])
+          .add(room);
+    }
+    return Map.fromEntries(
+      grouped.entries.toList()..sort((a, b) => a.key.compareTo(b.key)),
+    );
+  }
+
+  String _floorKey(String building, String floor) => '$building::$floor';
+
+  void _toggleBuilding(String building) {
+    setState(() {
+      if (!_expandedBuildings.add(building)) {
+        _expandedBuildings.remove(building);
+      }
+    });
+  }
+
+  void _toggleFloor(String building, String floor) {
+    final key = _floorKey(building, floor);
+    setState(() {
+      if (!_expandedFloors.add(key)) {
+        _expandedFloors.remove(key);
+      }
+    });
+  }
+
+  void _focusRoom(String roomName) {
+    ClassRoomConfig? target;
+    for (final room in widget.rooms) {
+      if (room.className == roomName) {
+        target = room;
+        break;
+      }
+    }
+    if (target == null) {
+      return;
+    }
+
+    setState(() {
+      _expandedBuildings.add(target!.buildingName);
+      _expandedFloors.add(_floorKey(target.buildingName, target.floorName));
+      _expandedRoom = target.className;
+    });
+    _loadRoomDetails(target.className);
   }
 
   Future<void> _loadIndicators() async {
@@ -187,6 +293,39 @@ class _DevicesScreenState extends State<DevicesScreen> {
         setState(() => _loadingDetails.remove(room));
       }
     }
+  }
+}
+
+class _HierarchyHeader extends StatelessWidget {
+  const _HierarchyHeader({
+    required this.icon,
+    required this.label,
+    required this.count,
+    required this.isExpanded,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final int count;
+  final bool isExpanded;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      onTap: onTap,
+      child: Row(
+        children: [
+          Icon(icon, color: AppColors.primary),
+          const SizedBox(width: 12),
+          Expanded(child: Text(label, style: AppTextStyles.cardTitle)),
+          Text('$count', style: AppTextStyles.caption),
+          const SizedBox(width: 8),
+          Icon(isExpanded ? Icons.expand_less : Icons.expand_more),
+        ],
+      ),
+    );
   }
 }
 

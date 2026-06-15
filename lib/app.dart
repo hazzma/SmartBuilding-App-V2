@@ -94,6 +94,8 @@ class _AppShellState extends State<_AppShell> {
   int _homeRefreshSignal = 0;
   int _scheduleRefreshSignal = 0;
   int _classesRefreshSignal = 0;
+  int _classFocusSignal = 0;
+  String? _focusedClassroom;
 
   final List<ClassRoomConfig> _classrooms = <ClassRoomConfig>[];
 
@@ -173,6 +175,7 @@ class _AppShellState extends State<_AppShell> {
             rooms: _classrooms,
             influxDbService: _influxDbService,
             refreshSignal: _homeRefreshSignal,
+            onAlertSelected: _openClassroom,
           ),
           ScheduleScreen(
             rooms: _classrooms,
@@ -184,6 +187,8 @@ class _AppShellState extends State<_AppShell> {
             influxDbService: _influxDbService,
             isActive: _currentIndex == 2,
             refreshSignal: _classesRefreshSignal,
+            focusedRoom: _focusedClassroom,
+            focusSignal: _classFocusSignal,
           ),
           SettingsScreen(
             onSignOut: widget.authService.signOut,
@@ -213,6 +218,9 @@ class _AppShellState extends State<_AppShell> {
   void _selectDestination(int index) {
     setState(() {
       _currentIndex = index;
+      if (index != 2) {
+        _focusedClassroom = null;
+      }
       if (index == 0) {
         _homeRefreshSignal++;
       } else if (index == 1) {
@@ -220,6 +228,15 @@ class _AppShellState extends State<_AppShell> {
       } else if (index == 2) {
         _classesRefreshSignal++;
       }
+    });
+  }
+
+  void _openClassroom(String room) {
+    setState(() {
+      _currentIndex = 2;
+      _focusedClassroom = room;
+      _classFocusSignal++;
+      _classesRefreshSignal++;
     });
   }
 

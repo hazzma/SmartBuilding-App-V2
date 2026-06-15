@@ -20,11 +20,13 @@ class HomeScreen extends StatefulWidget {
     this.rooms = const [],
     required this.influxDbService,
     required this.refreshSignal,
+    required this.onAlertSelected,
   });
 
   final List<ClassRoomConfig> rooms;
   final InfluxDbService influxDbService;
   final int refreshSignal;
+  final ValueChanged<String> onAlertSelected;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -34,7 +36,6 @@ class _HomeScreenState extends State<HomeScreen> {
   bool? _campusLightsOn;
   InfluxHomeSummary? _summary;
   List<InfluxRoomData> _allRoomsData = [];
-  List<InfluxOngoingClass> _ongoingClasses = [];
   bool _isLoading = false;
   bool _isUpdatingCampusLights = false;
   String? _loadError;
@@ -102,11 +103,10 @@ class _HomeScreenState extends State<HomeScreen> {
         const SizedBox(height: 20),
         const _SectionTitle('Active Alerts'),
         const SizedBox(height: 8),
-        _ActiveAlertsList(roomsData: _allRoomsData),
-        const SizedBox(height: 20),
-        const _SectionTitle('Ongoing Classes'),
-        const SizedBox(height: 8),
-        _OngoingClassesList(ongoingClasses: _ongoingClasses),
+        _ActiveAlertsList(
+          roomsData: _allRoomsData,
+          onAlertSelected: widget.onAlertSelected,
+        ),
       ],
     );
   }
@@ -139,7 +139,6 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _summary = summary;
         _allRoomsData = indicators.values.toList();
-        _ongoingClasses = ongoingClasses;
         _loadError = null;
       });
     } catch (error) {
@@ -269,70 +268,19 @@ class _SummaryBlock extends StatelessWidget {
   }
 }
 
-class _OngoingClassesList extends StatelessWidget {
-  const _OngoingClassesList({required this.ongoingClasses});
-
-  final List<InfluxOngoingClass> ongoingClasses;
-
-  @override
-  Widget build(BuildContext context) {
-    if (ongoingClasses.isEmpty) {
-      return const AppCard(
-        child: Row(
-          children: [
-            Icon(Icons.event_busy_outlined, color: AppColors.offline),
-            SizedBox(width: 12),
-            Expanded(child: Text('No ongoing classes.')),
-          ],
-        ),
-      );
-    }
-
-    return Column(
-      children: ongoingClasses.map((ongoingClass) {
-        return AppCard(
-          margin: const EdgeInsets.only(bottom: 8),
-          child: Row(
-            children: [
-              const Icon(Icons.event_available, color: AppColors.success),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Classroom ${ongoingClass.room}',
-                      style: AppTextStyles.bodyMedium
-                          .copyWith(fontWeight: FontWeight.bold),
-                    ),
-                    Text(
-                      '${ongoingClass.session.label} '
-                      '(${ongoingClass.session.timeRange})',
-                      style: AppTextStyles.caption,
-                    ),
-                  ],
-                ),
-              ),
-              const AppBadge(
-                label: 'active',
-                type: AppBadgeType.online,
-              ),
-            ],
-          ),
-        );
-      }).toList(),
-    );
-  }
-}
-
 class _ActiveAlertsList extends StatelessWidget {
-  const _ActiveAlertsList({required this.roomsData});
+  const _ActiveAlertsList({
+    required this.roomsData,
+    required this.onAlertSelected,
+  });
 
   final List<InfluxRoomData> roomsData;
+  final ValueChanged<String> onAlertSelected;
 
   @override
   Widget build(BuildContext context) {
-    final alertRooms = roomsData.where((r) => r.hasAlert).toList();
+    final alertRooms = roomsData.where((r) => r.hasAlert).toList()
+      ..sort((a, b) => a.room.compareTo(b.room));
 
     if (alertRooms.isEmpty) {
       return const AppCard(
@@ -346,39 +294,37 @@ class _ActiveAlertsList extends StatelessWidget {
       );
     }
 
-    return Column(
-      children: alertRooms.map((roomData) {
-        final alerts = roomData.alertLabels;
-        return AppCard(
-          margin: const EdgeInsets.only(bottom: 8),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Icon(Icons.warning_amber_outlined,
-                  color: AppColors.warning),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Alert in Classroom ${roomData.room}',
-                      style: AppTextStyles.bodyMedium
-                          .copyWith(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      alerts.isEmpty ? 'General alert' : alerts.join(', '),
-                      style: AppTextStyles.caption
-                          .copyWith(color: AppColors.error),
-                    ),
-                  ],
-                ),
+    return AppCard(
+      padding: EdgeInsets.zero,
+      child: ExpansionTile(
+        initiallyExpanded: true,
+        leading: const Icon(
+          Icons.warning_amber_outlined,
+          color: AppColors.warning,
+        ),
+        title: Text(
+          '${alertRooms.length} ${alertRooms.length == 1 ? 'class has' : 'classes have'} alerts',
+          style: AppTextStyles.cardTitle,
+        ),
+        shape: const Border(),
+        collapsedShape: const Border(),
+        children: [
+          const Divider(height: 1),
+          for (var index = 0; index < alertRooms.length; index++) ...[
+            ListTile(
+              leading: const Icon(
+                Icons.warning_amber_outlined,
+                color: AppColors.warning,
               ),
-            ],
-          ),
-        );
-      }).toList(),
+              title: Text('Class ${alertRooms[index].room} has alerts'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => onAlertSelected(alertRooms[index].room),
+            ),
+            if (index != alertRooms.length - 1)
+              const Divider(height: 1, indent: 56),
+          ],
+        ],
+      ),
     );
   }
 }
