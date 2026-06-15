@@ -308,13 +308,63 @@ $roomFilter  |> group(columns: ["room", "_field"])
 
   Future<void> writeRoomField(String room, String field, dynamic value) async {
     String valueStr;
-    if (value is bool) {
-      valueStr = value ? '1' : '0';
-    } else if (value is String) {
-      if (field == 'ac') {
-        final escaped = value.replaceAll('"', r'\"');
-        valueStr = '"$escaped"';
+    final normalizedField = field.toLowerCase();
+
+    // Fields that must be written as integers in InfluxDB (appended with 'i')
+    const intFields = {
+      'active',
+      'alert',
+      'co2',
+      'human',
+      'presence',
+      'motion',
+      'led',
+      'lux',
+      'projector',
+    };
+
+    if (intFields.contains(normalizedField)) {
+      if (value is bool) {
+        valueStr = value ? '1i' : '0i';
+      } else if (value is num) {
+        valueStr = '${value.toInt()}i';
       } else {
+        final str = value.toString().trim();
+        final parsed = int.tryParse(str);
+        if (parsed != null) {
+          valueStr = '${parsed}i';
+        } else {
+          final lower = str.toLowerCase();
+          if (lower == 'true' || lower == 'on' || lower == 'yes') {
+            valueStr = '1i';
+          } else if (lower == 'false' || lower == 'off' || lower == 'no') {
+            valueStr = '0i';
+          } else {
+            // Fallback for string digits
+            final digits = RegExp(r'^\d+$').hasMatch(str);
+            if (digits) {
+              valueStr = '${str}i';
+            } else {
+              valueStr = '0i'; // safe fallback
+            }
+          }
+        }
+      }
+    } else if (normalizedField == 'temp') {
+      if (value is num) {
+        valueStr = value.toString();
+      } else {
+        final parsed = double.tryParse(value.toString().trim());
+        valueStr = (parsed ?? 0.0).toString();
+      }
+    } else if (normalizedField == 'ac') {
+      final escaped = value.toString().replaceAll('"', r'\"');
+      valueStr = '"$escaped"';
+    } else {
+      // Fallback for other/unknown fields
+      if (value is bool) {
+        valueStr = value ? '1' : '0';
+      } else if (value is String) {
         final isDigits = RegExp(r'^\d+$').hasMatch(value);
         if (isDigits) {
           valueStr = int.parse(value).toString();
@@ -322,9 +372,9 @@ $roomFilter  |> group(columns: ["room", "_field"])
           final escaped = value.replaceAll('"', r'\"');
           valueStr = '"$escaped"';
         }
+      } else {
+        valueStr = value.toString();
       }
-    } else {
-      valueStr = value.toString();
     }
 
     final line = '$measurement,room=${_escapeFluxTag(room)} $field=$valueStr';
@@ -355,7 +405,7 @@ schema.tagValues(
       );
     }
 
-    final ledValue = turnOn ? 1 : 0;
+    final ledValue = turnOn ? '1i' : '0i';
     final lines = rooms
         .map(
           (room) => '$measurement,room=${_escapeFluxTag(room)} led=$ledValue',
@@ -452,7 +502,7 @@ from(bucket: "$bucket")
 
     final intCode = int.tryParse(code) ?? 0;
     final line =
-        'classroom_schedule,room=${_escapeFluxTag(room)} $dayOfWeek=$intCode';
+        'classroom_schedule,room=${_escapeFluxTag(room)} $dayOfWeek=${intCode}i';
 
     final client = HttpClient();
     try {
