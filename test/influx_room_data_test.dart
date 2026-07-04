@@ -23,17 +23,42 @@ void main() {
     expect(session, isNull);
   });
 
-  test('maps compact alert flags to individual sensors and controls', () {
+  test('maps decimal alert mask values to individual widgets', () {
     final room = InfluxRoomData.fromValues('L1D', {
-      'alert': '100101',
+      'alert': 80,
     });
 
-    expect(room.hasAlertFor('temp'), isTrue);
+    expect(room.hasAlertFor('temp'), isFalse);
     expect(room.hasAlertFor('lux'), isFalse);
     expect(room.hasAlertFor('human'), isFalse);
     expect(room.hasAlertFor('led'), isTrue);
     expect(room.hasAlertFor('projector'), isFalse);
     expect(room.hasAlertFor('ac'), isTrue);
+  });
+
+  test('does not treat decimal mask one as a general alert', () {
+    final room = InfluxRoomData.fromValues('L1D', {
+      'alert': 1,
+    });
+
+    expect(room.hasAlertFor('temp'), isTrue);
+    expect(room.hasAlertFor('lux'), isFalse);
+    expect(room.hasAlertFor('human'), isFalse);
+    expect(room.hasAlertFor('led'), isFalse);
+    expect(room.hasAlertFor('projector'), isFalse);
+    expect(room.hasAlertFor('ac'), isFalse);
+  });
+
+  test('maps zero alert mask to no sensor or actuator alerts', () {
+    final room = InfluxRoomData.fromValues('L1D', {
+      'alert': 0,
+    });
+
+    expect(room.hasAlert, isFalse);
+    expect(room.alertFlags, isEmpty);
+    expect(room.hasAlertFor('temp'), isFalse);
+    expect(room.hasAlertFor('led'), isFalse);
+    expect(room.hasAlertFor('ac'), isFalse);
   });
 
   test('keeps legacy eight-bit alert positions compatible', () {

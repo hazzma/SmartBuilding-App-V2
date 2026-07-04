@@ -74,18 +74,25 @@ class InfluxRoomData {
     }
 
     final text = alert.toString().trim().toLowerCase();
-    if (text == 'true' || text == '1') {
+    if (text == 'true') {
       return const {'general'};
     }
 
-    final digits = text.replaceAll(RegExp(r'[^01]'), '');
-    if (digits.isEmpty) {
+    final decimalMask = _decimalAlertMask(alert);
+    if (decimalMask != null) {
+      return _flagsFromDecimalMask(decimalMask);
+    }
+
+    final binaryDigits = text.replaceAll(RegExp(r'[^01]'), '');
+    if (binaryDigits.isEmpty) {
       return const {'general'};
     }
-    if (alert is num || digits.length >= 8) {
-      final padded = digits.padLeft(8, '0');
+
+    if (binaryDigits.length >= 8) {
+      final padded = binaryDigits.padLeft(8, '0');
       return {
         if (padded[0] == '1') 'temp',
+        if (padded[1] == '1') 'co2',
         if (padded[2] == '1') 'lux',
         if (padded[3] == '1') 'human',
         if (padded[4] == '1') 'led',
@@ -95,18 +102,19 @@ class InfluxRoomData {
       };
     }
 
-    if (digits.length == 7) {
+    if (binaryDigits.length == 7) {
       return {
-        if (digits[0] == '1') 'temp',
-        if (digits[2] == '1') 'lux',
-        if (digits[3] == '1') 'human',
-        if (digits[4] == '1') 'led',
-        if (digits[5] == '1') 'projector',
-        if (digits[6] == '1') 'presenceOutsideSchedule',
+        if (binaryDigits[0] == '1') 'temp',
+        if (binaryDigits[1] == '1') 'co2',
+        if (binaryDigits[2] == '1') 'lux',
+        if (binaryDigits[3] == '1') 'human',
+        if (binaryDigits[4] == '1') 'led',
+        if (binaryDigits[5] == '1') 'projector',
+        if (binaryDigits[6] == '1') 'presenceOutsideSchedule',
       };
     }
 
-    final padded = digits.padRight(6, '0');
+    final padded = binaryDigits.padRight(6, '0');
     return {
       if (padded[0] == '1') 'temp',
       if (padded[1] == '1') 'lux',
@@ -114,6 +122,42 @@ class InfluxRoomData {
       if (padded[3] == '1') 'led',
       if (padded[4] == '1') 'projector',
       if (padded[5] == '1') 'ac',
+    };
+  }
+
+  static int? _decimalAlertMask(dynamic value) {
+    if (value is bool) {
+      return null;
+    }
+    if (value is num) {
+      return value.toInt();
+    }
+
+    final text = value.toString().trim().toLowerCase();
+    if (text == 'true' || text == 'false') {
+      return null;
+    }
+
+    final parsed = int.tryParse(text);
+    if (parsed == null) {
+      return null;
+    }
+
+    final looksLikeLegacyBinary =
+        RegExp(r'^[01]{2,}$').hasMatch(text) && parsed > 255;
+    return looksLikeLegacyBinary ? null : parsed;
+  }
+
+  static Set<String> _flagsFromDecimalMask(int mask) {
+    return {
+      if ((mask & 1) != 0) 'temp',
+      if ((mask & 2) != 0) 'co2',
+      if ((mask & 4) != 0) 'lux',
+      if ((mask & 8) != 0) 'human',
+      if ((mask & 16) != 0) 'led',
+      if ((mask & 32) != 0) 'projector',
+      if ((mask & 64) != 0) 'ac',
+      if ((mask & 128) != 0) 'presenceOutsideSchedule',
     };
   }
 
