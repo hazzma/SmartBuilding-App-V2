@@ -1,12 +1,11 @@
 // EDIT_TARGET: lib/screens/devices_screen.dart
-// EDIT_PURPOSE: Database-backed classroom indicator, detail screen, and interactive controls
-// EDIT_REASON: Allows toggling LED/Projector power and configuring AC state directly in InfluxDB
-
+// EDIT_PURPOSE: Real-time classroom indicators, detail drawer, and interactive controls
+// EDIT_REASON: Allows toggling LED/Projector power and configuring AC state directly via MQTT
 import 'package:flutter/material.dart';
 
 import '../models/class_room_config.dart';
-import '../models/influx_room_data.dart';
-import '../services/influxdb_service.dart';
+import '../models/room_data.dart';
+import '../services/mqtt_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import '../widgets/app_badge.dart';
@@ -16,7 +15,7 @@ class DevicesScreen extends StatefulWidget {
   const DevicesScreen({
     super.key,
     required this.rooms,
-    required this.influxDbService,
+    required this.mqttService,
     required this.isActive,
     required this.refreshSignal,
     required this.focusedRoom,
@@ -24,7 +23,7 @@ class DevicesScreen extends StatefulWidget {
   });
 
   final List<ClassRoomConfig> rooms;
-  final InfluxDbService influxDbService;
+  final MqttService mqttService;
   final bool isActive;
   final int refreshSignal;
   final String? focusedRoom;
@@ -40,21 +39,32 @@ class _DevicesScreenState extends State<DevicesScreen> {
   final Set<String> _expandedFloors = <String>{};
   bool _loadingIndicators = false;
   String? _loadError;
-  Map<String, InfluxRoomData> _indicatorsByRoom = <String, InfluxRoomData>{};
-  final Map<String, InfluxRoomData> _detailsByRoom = <String, InfluxRoomData>{};
+  Map<String, RoomData> _indicatorsByRoom = <String, RoomData>{};
+  final Map<String, RoomData> _detailsByRoom = <String, RoomData>{};
   final Set<String> _loadingDetails = <String>{};
 
   @override
   void initState() {
     super.initState();
+    widget.mqttService.addListener(_onMqttUpdated);
     if (widget.isActive) {
       _loadIndicators();
     }
   }
 
   @override
+  void dispose() {
+    widget.mqttService.removeListener(_onMqttUpdated);
+    super.dispose();
+  }
+
+  @override
   void didUpdateWidget(covariant DevicesScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.mqttService != oldWidget.mqttService) {
+      oldWidget.mqttService.removeListener(_onMqttUpdated);
+      widget.mqttService.addListener(_onMqttUpdated);
+    }
     final becameActive = widget.isActive && !oldWidget.isActive;
     final refreshChanged = widget.refreshSignal != oldWidget.refreshSignal;
     if (becameActive || (widget.isActive && refreshChanged)) {
@@ -67,6 +77,19 @@ class _DevicesScreenState extends State<DevicesScreen> {
         widget.focusSignal != oldWidget.focusSignal &&
         widget.focusedRoom != null) {
       _focusRoom(widget.focusedRoom!);
+    }
+  }
+
+  void _onMqttUpdated() {
+    debugPrint('DevicesScreen: _onMqttUpdated triggered. isActive: ${widget.isActive}');
+    if (mounted && widget.isActive) {
+      _loadIndicators();
+      debugPrint('DevicesScreen: Indicators loaded. RoomData count: ${_indicatorsByRoom.length}');
+      if (_expandedRoom != null) {
+        _loadRoomDetails(_expandedRoom!);
+        final details = _detailsByRoom[_expandedRoom];
+        debugPrint('DevicesScreen: Expanded details for $_expandedRoom: lux=${details?.lux}, temp=${details?.temp}');
+      }
     }
   }
 
@@ -224,25 +247,8 @@ class _DevicesScreenState extends State<DevicesScreen> {
 
   Future<void> _loadIndicators() async {
     setState(() {
-      _loadingIndicators = true;
-      _loadError = null;
+      _indicatorsByRoom = widget.mqttService.roomIndicators;
     });
-
-    try {
-      final indicators = await widget.influxDbService.loadRoomIndicators();
-      if (!mounted) {
-        return;
-      }
-      setState(() => _indicatorsByRoom = indicators);
-    } catch (error) {
-      if (mounted) {
-        setState(() => _loadError = error.toString());
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _loadingIndicators = false);
-      }
-    }
   }
 
   void _toggleRoom(String room) {
@@ -254,45 +260,17 @@ class _DevicesScreenState extends State<DevicesScreen> {
     }
   }
 
-  Future<void> _loadRoomDetails(String room) async {
-    setState(() => _loadingDetails.add(room));
-    try {
-      final details = await widget.influxDbService.loadRoomDetails(room);
-      if (!mounted || details == null) {
-        return;
-      }
+  void _loadRoomDetails(String room) {
+    final details = widget.mqttService.getRoomDetails(room);
+    if (details != null) {
       setState(() => _detailsByRoom[room] = details);
-    } catch (error) {
-      if (mounted) {
-        setState(() => _loadError = error.toString());
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _loadingDetails.remove(room));
-      }
     }
   }
 
-  Future<void> _updateRoomField(
-      String room, String field, dynamic value) async {
-    setState(() {
-      _loadingDetails.add(room);
-    });
-    try {
-      await widget.influxDbService.writeRoomField(room, field, value);
-      await _loadRoomDetails(room);
-      await _loadIndicators();
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update $field: $error')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _loadingDetails.remove(room));
-      }
-    }
+  void _updateRoomField(String room, String field, dynamic value) {
+    widget.mqttService.publishControl(room, field, value);
+    _loadRoomDetails(room);
+    _loadIndicators();
   }
 }
 
@@ -338,7 +316,7 @@ class _ClassroomCard extends StatelessWidget {
   });
 
   final ClassRoomConfig room;
-  final InfluxRoomData? data;
+  final RoomData? data;
   final bool isExpanded;
   final VoidCallback onTap;
 
@@ -417,7 +395,7 @@ class _RoomDetailsCard extends StatelessWidget {
     required this.onFieldChanged,
   });
 
-  final InfluxRoomData? data;
+  final RoomData? data;
   final bool isLoading;
   final Function(String room, String field, dynamic value) onFieldChanged;
 
@@ -643,7 +621,7 @@ class _AcControlDialog extends StatefulWidget {
     required this.onSave,
   });
 
-  final InfluxRoomData roomData;
+  final RoomData roomData;
   final Function(String room, String field, dynamic value) onSave;
 
   @override

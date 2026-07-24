@@ -1,13 +1,12 @@
-// EDIT_TARGET: test/influx_room_data_test.dart
-// EDIT_PURPOSE: Verifies ongoing-session timing and per-field alert decoding
-// EDIT_REASON: Home activity and classroom warning icons depend on stable mappings
-
+// EDIT_TARGET: test/room_data_test.dart
+// EDIT_PURPOSE: Verifies ongoing-session timing and per-field alert decoding for RoomData
+// EDIT_REASON: Ensures UI badges and warning icons correctly map to parsed sensor payloads
 import 'package:flutter_test/flutter_test.dart';
-import 'package:smart_building_app/models/influx_room_data.dart';
+import 'package:smart_building_app/models/room_data.dart';
 
 void main() {
   test('finds the current predefined session', () {
-    final session = InfluxScheduleSession.at(
+    final session = ScheduleSession.at(
       DateTime(2026, 6, 9, 13, 30),
     );
 
@@ -16,7 +15,7 @@ void main() {
   });
 
   test('returns no session during the break between sessions', () {
-    final session = InfluxScheduleSession.at(
+    final session = ScheduleSession.at(
       DateTime(2026, 6, 9, 13, 10),
     );
 
@@ -24,9 +23,7 @@ void main() {
   });
 
   test('maps decimal alert mask values to individual widgets', () {
-    final room = InfluxRoomData.fromValues('L1D', {
-      'alert': 80,
-    });
+    final room = RoomData.fromFieldValue(null, 'alert', 80);
 
     expect(room.hasAlertFor('temp'), isFalse);
     expect(room.hasAlertFor('lux'), isFalse);
@@ -37,9 +34,7 @@ void main() {
   });
 
   test('does not treat decimal mask one as a general alert', () {
-    final room = InfluxRoomData.fromValues('L1D', {
-      'alert': 1,
-    });
+    final room = RoomData.fromFieldValue(null, 'alert', 1);
 
     expect(room.hasAlertFor('temp'), isTrue);
     expect(room.hasAlertFor('lux'), isFalse);
@@ -50,9 +45,7 @@ void main() {
   });
 
   test('maps zero alert mask to no sensor or actuator alerts', () {
-    final room = InfluxRoomData.fromValues('L1D', {
-      'alert': 0,
-    });
+    final room = RoomData.fromFieldValue(null, 'alert', 0);
 
     expect(room.hasAlert, isFalse);
     expect(room.alertFlags, isEmpty);
@@ -62,9 +55,7 @@ void main() {
   });
 
   test('keeps legacy eight-bit alert positions compatible', () {
-    final room = InfluxRoomData.fromValues('L1D', {
-      'alert': '00100010',
-    });
+    final room = RoomData.fromFieldValue(null, 'alert', '00100010');
 
     expect(room.hasAlertFor('lux'), isTrue);
     expect(room.hasAlertFor('ac'), isTrue);

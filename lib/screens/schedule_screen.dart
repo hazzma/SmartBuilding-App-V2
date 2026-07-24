@@ -1,11 +1,10 @@
 // EDIT_TARGET: lib/screens/schedule_screen.dart
 // EDIT_PURPOSE: Classroom weekly repeating schedule manager
-// EDIT_REASON: Replaces calendar-based dates with weekly repeating sessions based on the DB schema
-
+// EDIT_REASON: Allows configuring schedules and publishing them to masters over MQTT
 import 'package:flutter/material.dart';
 
 import '../models/class_room_config.dart';
-import '../services/influxdb_service.dart';
+import '../services/mqtt_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import '../widgets/app_button.dart';
@@ -15,12 +14,12 @@ class ScheduleScreen extends StatefulWidget {
   const ScheduleScreen({
     super.key,
     required this.rooms,
-    required this.influxDbService,
+    required this.mqttService,
     required this.refreshSignal,
   });
 
   final List<ClassRoomConfig> rooms;
-  final InfluxDbService influxDbService;
+  final MqttService mqttService;
   final int refreshSignal;
 
   @override
@@ -46,6 +45,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   @override
   void initState() {
     super.initState();
+    widget.mqttService.addListener(_onMqttUpdated);
     if (widget.rooms.isNotEmpty) {
       _selectedRoom = widget.rooms.first;
       _loadSchedule();
@@ -53,8 +53,18 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   }
 
   @override
+  void dispose() {
+    widget.mqttService.removeListener(_onMqttUpdated);
+    super.dispose();
+  }
+
+  @override
   void didUpdateWidget(covariant ScheduleScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.mqttService != oldWidget.mqttService) {
+      oldWidget.mqttService.removeListener(_onMqttUpdated);
+      widget.mqttService.addListener(_onMqttUpdated);
+    }
     if (widget.refreshSignal != oldWidget.refreshSignal) {
       _loadSchedule();
     }
@@ -77,6 +87,12 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     }
   }
 
+  void _onMqttUpdated() {
+    if (mounted) {
+      _loadSchedule();
+    }
+  }
+
   Future<void> _loadSchedule() async {
     if (_selectedRoom == null) return;
     setState(() {
@@ -85,8 +101,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     });
 
     try {
-      final schedule = await widget.influxDbService
-          .loadClassroomSchedule(_selectedRoom!.className);
+      final schedule = widget.mqttService.getSchedule(_selectedRoom!.className);
       if (mounted) {
         setState(() {
           _scheduleData = schedule;
@@ -119,7 +134,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     });
 
     try {
-      await widget.influxDbService.writeClassroomSchedule(
+      await widget.mqttService.saveSchedule(
         _selectedRoom!.className,
         day,
         code,

@@ -1,11 +1,11 @@
-// EDIT_TARGET: lib/models/influx_room_data.dart
-// EDIT_PURPOSE: Holds latest classroom values loaded from InfluxDB.
-// EDIT_REASON: UI screens need typed access to room tag data without owning query details.
-
-class InfluxRoomData {
-  const InfluxRoomData({
+// EDIT_TARGET: lib/models/room_data.dart
+// EDIT_PURPOSE: Holds classroom status and sensor metrics received from MQTT topics
+// EDIT_REASON: Standardizes status evaluations (presence, alerts, AC parameters) for all screens
+class RoomData {
+  const RoomData({
     required this.room,
     this.temp,
+    this.co2,
     this.lux,
     this.human,
     this.led,
@@ -22,6 +22,7 @@ class InfluxRoomData {
 
   final String room;
   final double? temp;
+  final double? co2;
   final double? lux;
   final bool? human;
   final bool? led;
@@ -58,6 +59,7 @@ class InfluxRoomData {
     if (flags.contains('general')) {
       return const {
         'temp',
+        'co2',
         'lux',
         'human',
         'led',
@@ -168,6 +170,7 @@ class InfluxRoomData {
     }
     return [
       if (flags.contains('temp')) 'Temperature error',
+      if (flags.contains('co2')) 'CO2 error',
       if (flags.contains('lux')) 'Lux error',
       if (flags.contains('human')) 'Presence error',
       if (flags.contains('led')) 'LED error',
@@ -200,6 +203,7 @@ class InfluxRoomData {
   String valueLabel(String field) {
     return switch (field) {
       'temp' => temp == null ? '-' : '${temp!.toStringAsFixed(1)} C',
+      'co2' => co2 == null ? '-' : '${co2!.toStringAsFixed(0)} ppm',
       'lux' => lux == null ? '-' : '${lux!.toStringAsFixed(0)} lx',
       'human' || 'presense' || 'presence' => _yesNoLabel(human),
       'led' => _boolLabel(led),
@@ -225,53 +229,6 @@ class InfluxRoomData {
       false => 'no',
       null => '-',
     };
-  }
-
-  factory InfluxRoomData.fromValues(
-    String room,
-    Map<String, dynamic> values,
-  ) {
-    final acVal = values['ac'];
-    bool? acPower;
-    int? acTemp;
-    int? acFan;
-    int? acSwing;
-    if (acVal != null) {
-      final acStr = acVal.toString().trim();
-      final acInt = int.tryParse(acStr);
-      if (acStr.contains('/')) {
-        final parts = acStr.split('/');
-        acPower = parts[0] == '01' || parts[0] == '1';
-        acTemp = int.tryParse(parts[1]);
-        acFan = int.tryParse(parts[2]);
-        acSwing = int.tryParse(parts[3]);
-      } else if (acInt != null && acStr.length >= 5) {
-        final padded = acStr.padLeft(8, '0');
-        acPower = padded.substring(0, 2) == '01';
-        acTemp = int.tryParse(padded.substring(2, 4));
-        acFan = int.tryParse(padded.substring(4, 6));
-        acSwing = int.tryParse(padded.substring(6, 8));
-      } else {
-        acPower = _asBool(acVal);
-      }
-    }
-
-    return InfluxRoomData(
-      room: room,
-      temp: _asDouble(values['temp']),
-      lux: _asDouble(values['lux']),
-      human: _asBool(values['presence'] ?? values['human'] ?? values['motion']),
-      led: _asBool(values['led']),
-      projector: _asBool(values['projector']),
-      ac: acPower,
-      alert: values['alert'],
-      active: _asBool(values['active']),
-      acRaw: acVal?.toString(),
-      acPower: acPower,
-      acTemp: acTemp,
-      acFan: acFan,
-      acSwing: acSwing,
-    );
   }
 
   static double? _asDouble(dynamic value) {
@@ -304,10 +261,106 @@ class InfluxRoomData {
     }
     return null;
   }
+
+  RoomData copyWith({
+    String? room,
+    double? temp,
+    double? co2,
+    double? lux,
+    bool? human,
+    bool? led,
+    bool? projector,
+    bool? ac,
+    dynamic alert,
+    bool? active,
+    String? acRaw,
+    bool? acPower,
+    int? acTemp,
+    int? acFan,
+    int? acSwing,
+  }) {
+    return RoomData(
+      room: room ?? this.room,
+      temp: temp ?? this.temp,
+      co2: co2 ?? this.co2,
+      lux: lux ?? this.lux,
+      human: human ?? this.human,
+      led: led ?? this.led,
+      projector: projector ?? this.projector,
+      ac: ac ?? this.ac,
+      alert: alert ?? this.alert,
+      active: active ?? this.active,
+      acRaw: acRaw ?? this.acRaw,
+      acPower: acPower ?? this.acPower,
+      acTemp: acTemp ?? this.acTemp,
+      acFan: acFan ?? this.acFan,
+      acSwing: acSwing ?? this.acSwing,
+    );
+  }
+
+  factory RoomData.fromFieldValue(RoomData? current, String field, dynamic rawValue) {
+    final roomName = current?.room ?? '';
+    final map = <String, dynamic>{
+      'temp': current?.temp,
+      'co2': current?.co2,
+      'lux': current?.lux,
+      'human': current?.human,
+      'led': current?.led,
+      'projector': current?.projector,
+      'ac': current?.acRaw,
+      'alert': current?.alert,
+      'active': current?.active,
+    };
+
+    map[field.toLowerCase()] = rawValue;
+
+    final acVal = map['ac'];
+    bool? acPower;
+    int? acTemp;
+    int? acFan;
+    int? acSwing;
+    if (acVal != null) {
+      final acStr = acVal.toString().trim();
+      final acInt = int.tryParse(acStr);
+      if (acStr.contains('/')) {
+        final parts = acStr.split('/');
+        acPower = parts[0] == '01' || parts[0] == '1';
+        acTemp = int.tryParse(parts[1]);
+        acFan = int.tryParse(parts[2]);
+        acSwing = int.tryParse(parts[3]);
+      } else if (acInt != null && acStr.length >= 5) {
+        final padded = acStr.padLeft(8, '0');
+        acPower = padded.substring(0, 2) == '01';
+        acTemp = int.tryParse(padded.substring(2, 4));
+        acFan = int.tryParse(padded.substring(4, 6));
+        acSwing = int.tryParse(padded.substring(6, 8));
+      } else {
+        acPower = _asBool(acVal);
+      }
+    }
+
+    return RoomData(
+      room: roomName,
+      temp: _asDouble(map['temp']),
+      co2: _asDouble(map['co2']),
+      lux: _asDouble(map['lux']),
+      human: _asBool(map['presence'] ?? map['human'] ?? map['motion']),
+      led: _asBool(map['led']),
+      projector: _asBool(map['projector']),
+      ac: acPower,
+      alert: map['alert'],
+      active: _asBool(map['active']),
+      acRaw: acVal?.toString(),
+      acPower: acPower,
+      acTemp: acTemp,
+      acFan: acFan,
+      acSwing: acSwing,
+    );
+  }
 }
 
-class InfluxHomeSummary {
-  const InfluxHomeSummary({
+class HomeSummary {
+  const HomeSummary({
     required this.totalClasses,
     required this.activeClasses,
     required this.alertCount,
@@ -318,18 +371,18 @@ class InfluxHomeSummary {
   final int alertCount;
 }
 
-class InfluxOngoingClass {
-  const InfluxOngoingClass({
+class OngoingClass {
+  const OngoingClass({
     required this.room,
     required this.session,
   });
 
   final String room;
-  final InfluxScheduleSession session;
+  final ScheduleSession session;
 }
 
-class InfluxScheduleSession {
-  const InfluxScheduleSession({
+class ScheduleSession {
+  const ScheduleSession({
     required this.number,
     required this.startHour,
     required this.startMinute,
@@ -372,43 +425,43 @@ class InfluxScheduleSession {
     return !dateTime.isBefore(start) && dateTime.isBefore(end);
   }
 
-  static const List<InfluxScheduleSession> all = [
-    InfluxScheduleSession(
+  static const List<ScheduleSession> all = [
+    ScheduleSession(
       number: 1,
       startHour: 7,
       startMinute: 20,
       endHour: 9,
       endMinute: 0,
     ),
-    InfluxScheduleSession(
+    ScheduleSession(
       number: 2,
       startHour: 9,
       startMinute: 20,
       endHour: 11,
       endMinute: 0,
     ),
-    InfluxScheduleSession(
+    ScheduleSession(
       number: 3,
       startHour: 11,
       startMinute: 20,
       endHour: 13,
       endMinute: 0,
     ),
-    InfluxScheduleSession(
+    ScheduleSession(
       number: 4,
       startHour: 13,
       startMinute: 20,
       endHour: 15,
       endMinute: 0,
     ),
-    InfluxScheduleSession(
+    ScheduleSession(
       number: 5,
       startHour: 15,
       startMinute: 20,
       endHour: 17,
       endMinute: 0,
     ),
-    InfluxScheduleSession(
+    ScheduleSession(
       number: 6,
       startHour: 17,
       startMinute: 20,
@@ -417,7 +470,7 @@ class InfluxScheduleSession {
     ),
   ];
 
-  static InfluxScheduleSession? at(DateTime dateTime) {
+  static ScheduleSession? at(DateTime dateTime) {
     for (final session in all) {
       if (session.contains(dateTime)) {
         return session;

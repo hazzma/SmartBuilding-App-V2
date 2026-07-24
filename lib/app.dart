@@ -1,17 +1,15 @@
 // EDIT_TARGET: lib/app.dart
-// EDIT_PURPOSE: Root MaterialApp plus small private app-shell helpers
-// EDIT_REASON: One-off structure widgets stay here so lib/widgets only contains reusable components
-
+// EDIT_PURPOSE: Root MaterialApp plus AppShell state container using MqttService
+// EDIT_REASON: Connects the navigation shell and sub-screens to real-time MQTT events
 import 'package:flutter/material.dart';
 
-import 'models/class_room_config.dart';
 import 'screens/auth_screen.dart';
 import 'screens/devices_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/schedule_screen.dart';
 import 'screens/settings_screen.dart';
 import 'services/auth_service.dart';
-import 'services/influxdb_service.dart';
+import 'services/mqtt_service.dart';
 import 'theme/app_colors.dart';
 import 'theme/app_theme.dart';
 import 'widgets/app_button.dart';
@@ -31,30 +29,34 @@ class SmartBuildingApp extends StatelessWidget {
 }
 
 class _AuthGate extends StatefulWidget {
-  _AuthGate({AuthService? authService})
-      : authService = authService ?? AuthService();
+  const _AuthGate({this.authService});
 
-  final AuthService authService;
+  final AuthService? authService;
 
   @override
   State<_AuthGate> createState() => _AuthGateState();
 }
 
 class _AuthGateState extends State<_AuthGate> {
-  late Future<void> _loadAuth;
+  AuthService? _authService;
+  Future<void>? _loadAuth;
 
   @override
   void initState() {
     super.initState();
-    _loadAuth = widget.authService.load();
-    widget.authService.addListener(_handleAuthChanged);
+    final service = widget.authService ?? AuthService();
+    _authService = service;
+    _loadAuth = service.load();
+    service.addListener(_handleAuthChanged);
   }
 
   @override
   void dispose() {
-    widget.authService.removeListener(_handleAuthChanged);
+    _authService?.removeListener(_handleAuthChanged);
     super.dispose();
   }
+
+  void _handleMqttChanged() {}
 
   void _handleAuthChanged() {
     if (mounted) {
@@ -64,16 +66,22 @@ class _AuthGateState extends State<_AuthGate> {
 
   @override
   Widget build(BuildContext context) {
+    final loadAuth = _loadAuth;
+    final service = _authService;
+    if (loadAuth == null || service == null) {
+      return const AppLoading();
+    }
+
     return FutureBuilder<void>(
-      future: _loadAuth,
+      future: loadAuth,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
           return const AppLoading();
         }
-        if (!widget.authService.isAuthenticated) {
-          return AuthScreen(authService: widget.authService);
+        if (!service.isAuthenticated) {
+          return AuthScreen(authService: service);
         }
-        return _AppShell(authService: widget.authService);
+        return _AppShell(authService: service);
       },
     );
   }
@@ -90,81 +98,46 @@ class _AppShell extends StatefulWidget {
 
 class _AppShellState extends State<_AppShell> {
   int _currentIndex = 0;
-  InfluxDbService _influxDbService = InfluxDbService();
+  final MqttService _mqttService = MqttService();
   int _homeRefreshSignal = 0;
   int _scheduleRefreshSignal = 0;
   int _classesRefreshSignal = 0;
   int _classFocusSignal = 0;
   String? _focusedClassroom;
 
-  final List<ClassRoomConfig> _classrooms = <ClassRoomConfig>[];
-
   @override
   void initState() {
     super.initState();
-    _loadClassrooms();
+    _mqttService.addListener(_handleMqttChanged);
+    _mqttService.connect();
   }
 
-  Future<void> _loadClassrooms() async {
-    try {
-      final roomNames = await _influxDbService.loadRooms();
-      final nextClassrooms = roomNames.map(_classroomFromRoomTag).toList();
-      if (!mounted) {
-        return;
-      }
+  @override
+  void dispose() {
+    _mqttService.removeListener(_handleMqttChanged);
+    _mqttService.disconnect();
+    super.dispose();
+  }
 
-      setState(() {
-        _classrooms
-          ..clear()
-          ..addAll(nextClassrooms);
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('InfluxDB room load failed: $error')),
-      );
+  void _handleMqttChanged() {
+    if (mounted) {
+      setState(() {});
     }
-  }
-
-  ClassRoomConfig _classroomFromRoomTag(String room) {
-    final normalized = room.trim();
-    return ClassRoomConfig(
-      id: 'room-${normalized.toLowerCase()}',
-      className: normalized,
-      displayName: 'Class $normalized',
-      buildingName: _buildingNameFromRoom(normalized),
-      floorName: _floorNameFromRoom(normalized),
-    );
-  }
-
-  String _buildingNameFromRoom(String room) {
-    if (room.isEmpty) {
-      return 'Building';
-    }
-    return 'Building ${room[0].toUpperCase()}';
-  }
-
-  String _floorNameFromRoom(String room) {
-    if (room.length < 2) {
-      return 'Floor 1';
-    }
-    final floor = int.tryParse(room[1]);
-    return floor == null ? 'Floor 1' : 'Floor $floor';
   }
 
   @override
   Widget build(BuildContext context) {
+    final classroomsList = _mqttService.classrooms;
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text('Smart Class'),
         actions: [
           IconButton(
-            tooltip: 'Refresh',
+            tooltip: 'Refresh / Reconnect',
             icon: const Icon(Icons.refresh),
-            onPressed: _refreshDummyStatus,
+            onPressed: _refreshMqttStatus,
           ),
         ],
       ),
@@ -172,19 +145,19 @@ class _AppShellState extends State<_AppShell> {
         index: _currentIndex,
         children: [
           HomeScreen(
-            rooms: _classrooms,
-            influxDbService: _influxDbService,
+            rooms: classroomsList,
+            mqttService: _mqttService,
             refreshSignal: _homeRefreshSignal,
             onAlertSelected: _openClassroom,
           ),
           ScheduleScreen(
-            rooms: _classrooms,
-            influxDbService: _influxDbService,
+            rooms: classroomsList,
+            mqttService: _mqttService,
             refreshSignal: _scheduleRefreshSignal,
           ),
           DevicesScreen(
-            rooms: _classrooms,
-            influxDbService: _influxDbService,
+            rooms: classroomsList,
+            mqttService: _mqttService,
             isActive: _currentIndex == 2,
             refreshSignal: _classesRefreshSignal,
             focusedRoom: _focusedClassroom,
@@ -192,9 +165,7 @@ class _AppShellState extends State<_AppShell> {
           ),
           SettingsScreen(
             onSignOut: widget.authService.signOut,
-            // NEW UPDATE: INPUT SERVER - Sends active InfluxDB config to Settings.
-            influxDbService: _influxDbService,
-            onInfluxDbChanged: _updateInfluxDb,
+            mqttService: _mqttService,
           ),
         ],
       ),
@@ -208,7 +179,9 @@ class _AppShellState extends State<_AppShell> {
             label: 'Schedule',
           ),
           NavigationDestination(
-              icon: Icon(Icons.meeting_room), label: 'Classes'),
+            icon: Icon(Icons.meeting_room),
+            label: 'Classes',
+          ),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
@@ -240,10 +213,8 @@ class _AppShellState extends State<_AppShell> {
     });
   }
 
-  void _refreshDummyStatus() {
-    if (_currentIndex == 2) {
-      _loadClassrooms();
-    }
+  void _refreshMqttStatus() {
+    _mqttService.connect();
     setState(() {
       if (_currentIndex == 0) {
         _homeRefreshSignal++;
@@ -253,16 +224,5 @@ class _AppShellState extends State<_AppShell> {
         _classesRefreshSignal++;
       }
     });
-  }
-
-  // NEW UPDATE: INPUT SERVER - Applies Settings values to all InfluxDB screens.
-  void _updateInfluxDb(InfluxDbService service) {
-    setState(() {
-      _influxDbService = service;
-      _homeRefreshSignal++;
-      _scheduleRefreshSignal++;
-      _classesRefreshSignal++;
-    });
-    _loadClassrooms();
   }
 }

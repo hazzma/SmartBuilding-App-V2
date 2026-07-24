@@ -1,14 +1,13 @@
 // EDIT_TARGET: lib/screens/home_screen.dart
-// EDIT_PURPOSE: Campus overview, global lighting controls, ongoing classes and active alerts
-// EDIT_REASON: Home should focus on global status instead of classroom-specific detail panels
-
+// EDIT_PURPOSE: Campus overview, global lighting controls, and active alerts list
+// EDIT_REASON: Connects the campus-wide status blocks and buttons to real-time MQTT events
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 
 import '../models/class_room_config.dart';
-import '../models/influx_room_data.dart';
-import '../services/influxdb_service.dart';
+import '../models/room_data.dart';
+import '../services/mqtt_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import '../widgets/app_badge.dart';
@@ -18,13 +17,13 @@ class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
     this.rooms = const [],
-    required this.influxDbService,
+    required this.mqttService,
     required this.refreshSignal,
     required this.onAlertSelected,
   });
 
   final List<ClassRoomConfig> rooms;
-  final InfluxDbService influxDbService;
+  final MqttService mqttService;
   final int refreshSignal;
   final ValueChanged<String> onAlertSelected;
 
@@ -34,34 +33,39 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   bool? _campusLightsOn;
-  InfluxHomeSummary? _summary;
-  List<InfluxRoomData> _allRoomsData = [];
+  HomeSummary? _summary;
+  List<RoomData> _allRoomsData = [];
   bool _isLoading = false;
   bool _isUpdatingCampusLights = false;
   String? _loadError;
-  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
+    widget.mqttService.addListener(_onMqttUpdated);
     _loadHomeData();
-    _refreshTimer = Timer.periodic(
-      const Duration(minutes: 1),
-      (_) => _loadHomeData(showLoading: false),
-    );
   }
 
   @override
   void dispose() {
-    _refreshTimer?.cancel();
+    widget.mqttService.removeListener(_onMqttUpdated);
     super.dispose();
   }
 
   @override
   void didUpdateWidget(covariant HomeScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.refreshSignal != widget.refreshSignal) {
-      _loadHomeData();
+    if (widget.mqttService != oldWidget.mqttService) {
+      oldWidget.mqttService.removeListener(_onMqttUpdated);
+      widget.mqttService.addListener(_onMqttUpdated);
+    }
+    _loadHomeData(showLoading: false);
+  }
+
+  void _onMqttUpdated() {
+    debugPrint('HomeScreen: _onMqttUpdated triggered.');
+    if (mounted) {
+      _loadHomeData(showLoading: false);
     }
   }
 
@@ -69,7 +73,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final rooms = widget.rooms;
     final summary = _summary ??
-        InfluxHomeSummary(
+        HomeSummary(
           totalClasses: rooms.length,
           activeClasses: 0,
           alertCount: 0,
@@ -120,19 +124,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     try {
-      final results = await Future.wait<Object>([
-        widget.influxDbService.loadRooms(),
-        widget.influxDbService.loadRoomIndicators(),
-        widget.influxDbService.loadOngoingClasses(),
-      ]);
-      final rooms = results[0] as List<String>;
-      final indicators = results[1] as Map<String, InfluxRoomData>;
-      final ongoingClasses = results[2] as List<InfluxOngoingClass>;
-      final summary = InfluxHomeSummary(
-        totalClasses: rooms.length,
-        activeClasses: ongoingClasses.length,
-        alertCount: indicators.values.where((room) => room.hasAlert).length,
-      );
+      final summary = await widget.mqttService.loadHomeSummary();
+      final indicators = widget.mqttService.roomIndicators;
       if (!mounted) {
         return;
       }
@@ -142,10 +135,9 @@ class _HomeScreenState extends State<HomeScreen> {
         _loadError = null;
       });
     } catch (error) {
-      if (!mounted) {
-        return;
+      if (mounted) {
+        setState(() => _loadError = error.toString());
       }
-      setState(() => _loadError = error.toString());
     } finally {
       if (mounted && showLoading) {
         setState(() => _isLoading = false);
@@ -153,17 +145,14 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _setCampusLights(bool turnOn) async {
+  void _setCampusLights(bool turnOn) {
     if (_isUpdatingCampusLights) {
       return;
     }
 
     setState(() => _isUpdatingCampusLights = true);
     try {
-      await widget.influxDbService.writeCampusLights(turnOn);
-      if (!mounted) {
-        return;
-      }
+      widget.mqttService.publishCampusLights(turnOn);
       setState(() => _campusLightsOn = turnOn);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -175,16 +164,11 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to update campus lights: $error')),
       );
     } finally {
-      if (mounted) {
-        setState(() => _isUpdatingCampusLights = false);
-      }
+      setState(() => _isUpdatingCampusLights = false);
     }
   }
 }
@@ -274,7 +258,7 @@ class _ActiveAlertsList extends StatelessWidget {
     required this.onAlertSelected,
   });
 
-  final List<InfluxRoomData> roomsData;
+  final List<RoomData> roomsData;
   final ValueChanged<String> onAlertSelected;
 
   @override
